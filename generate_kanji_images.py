@@ -11,11 +11,12 @@ kanji,meaning,readings,compounds
 ```
 """
 
-from PIL import Image, ImageDraw, ImageFont
 import csv
-import re
 import os
+import re
 import sys
+
+from PIL import Image, ImageDraw, ImageFont
 
 # Image configuration for PC wallpaper (1920x1080)
 IMAGE_WIDTH = 1920
@@ -40,6 +41,7 @@ class KanjiImageGenerator:
         """Load suitable fonts for Japanese characters."""
         font_paths = [
             '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',  # Ubuntu/Debian
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Light.ttc',
             '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # Alternative path
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # Fallback
             '/System/Library/Fonts/Hiragino Sans GB.ttc',  # macOS
@@ -54,10 +56,10 @@ class KanjiImageGenerator:
                     self.font_medium = ImageFont.truetype(font_path, 32)  # Smaller meaning/readings
                     self.font_small = ImageFont.truetype(font_path, 24)   # Smaller compounds
                     self.font_jis = ImageFont.truetype(font_path, 16)     # Smaller JIS text
-                    print(f"Successfully loaded font: {font_path}")
+                    print("Successfully loaded font: {}".format(font_path))
                     return
                 except Exception as e:
-                    print(f"Failed to load font {font_path}: {e}")
+                    print("Failed to load font {}: {}".format(font_path, e))
                     continue
         
         # Fallback to default font
@@ -453,7 +455,7 @@ def main():
     for i, kanji_data in enumerate(kanji_list):
         # Generate filename with zero-padding (5 digits like in N3)
         file_number = i + 1
-        filename = f"JLPT_N2_{file_number:05d}.png"
+        filename = f"JLPT_{suffix}_{file_number:05d}.png"
         output_path = os.path.join(output_dir, filename)
         
         if generator.create_kanji_image(kanji_data, output_path):
