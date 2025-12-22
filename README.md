@@ -1,5 +1,7 @@
 # Kanji Slideshow  
-Automatic learning kanji through wallpaper slideshow.
+Automatic learning kanji through wallpaper slideshow. An example is below.  
+
+![Example](./JLPT-N2-SAMPLE/JLPT_N2-SAMPLE_00007.png)
 
 # Required packages
 This package requires the following Python packages:

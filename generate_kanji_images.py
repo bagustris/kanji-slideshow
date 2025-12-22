@@ -33,6 +33,7 @@ COMPOUND_READING_COLOR = (
 ACCENT_COLOR = (100, 149, 237)  # Cornflower blue for section headers
 KANJI_COLOR = (255, 255, 255)  # White for main kanji
 STROKE_ORDER_COLOR = (128, 128, 128)  # Gray for stroke order info
+READING_BG_COLOR = (45, 45, 45, 255)  # Subtle background for readings
 
 
 class KanjiImageGenerator:
@@ -214,99 +215,118 @@ class KanjiImageGenerator:
         )
         right_y += 45 + vertical_spacing
 
-        # Draw katakana readings first (onyomi) - blue before dot, white after, remove dot
-        if kanji_data.get("katakana_readings"):
-            current_x = right_x
-            for i, reading in enumerate(kanji_data["katakana_readings"]):
-                # Handle readings with dots - blue before dot, white after, remove dot
-                if "・" in reading or "." in reading:
-                    # Split by either type of dot
-                    if "・" in reading:
-                        parts = reading.split("・", 1)  # Split only on first dot
-                    else:
-                        parts = reading.split(".", 1)  # Split only on first dot
+        pill_padding_x = 6
+        pill_padding_y = 4
+        pill_gap = 16
+        max_reading_x = IMAGE_WIDTH - x_margin
+        reading_line_step = 40
 
-                    # Draw the part before dot in blue
+        def _draw_text_background(x, y, text_width, text_bbox, padding_x, padding_y):
+            """Draw a padded background behind text drawn at (x, y)."""
+            # text_bbox is a (left, top, right, bottom) bbox for the text at origin.
+            x0 = x - padding_x
+            y0 = y + text_bbox[1] - padding_y
+            x1 = x + text_width + padding_x
+            y1 = y + text_bbox[3] + padding_y
+            try:
+                draw.rounded_rectangle(
+                    (x0, y0, x1, y1), radius=10, fill=READING_BG_COLOR
+                )
+            except Exception:
+                draw.rectangle((x0, y0, x1, y1), fill=READING_BG_COLOR)
+
+        def _draw_readings(readings, y):
+            current_x = right_x
+
+            for reading in readings:
+                # Determine pill dimensions up front for wrapping.
+                if "・" in reading or "." in reading:
+                    if "・" in reading:
+                        parts = reading.split("・", 1)
+                    else:
+                        parts = reading.split(".", 1)
+
+                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_medium)
+                    bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_medium)
+                    width_before = bbox_before[2] - bbox_before[0]
+                    width_after = bbox_after[2] - bbox_after[0]
+
+                    combined_width = width_before + width_after
+                    pill_total_width = combined_width + (2 * pill_padding_x)
+
+                    if (
+                        current_x + pill_total_width > max_reading_x
+                        and current_x != right_x
+                    ):
+                        y += reading_line_step
+                        current_x = right_x
+
+                    combined_bbox = (
+                        0,
+                        min(bbox_before[1], bbox_after[1]),
+                        combined_width,
+                        max(bbox_before[3], bbox_after[3]),
+                    )
+                    _draw_text_background(
+                        current_x,
+                        y,
+                        combined_width,
+                        combined_bbox,
+                        pill_padding_x,
+                        pill_padding_y,
+                    )
+
+                    # Draw in two colors (existing behavior), but share one background.
                     draw.text(
-                        (current_x, right_y),
+                        (current_x, y),
                         parts[0],
                         font=self.font_medium,
                         fill=ACCENT_COLOR,
                     )
-                    # Calculate width of first part
-                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_medium)
-                    current_x += bbox_before[2] - bbox_before[0]
-
-                    # Draw the part after dot in white (without the dot)
                     draw.text(
-                        (current_x, right_y),
+                        (current_x + width_before, y),
                         parts[1],
                         font=self.font_medium,
                         fill=TEXT_COLOR,
                     )
-                    # Calculate width of second part
-                    bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_medium)
-                    current_x += (
-                        bbox_after[2] - bbox_after[0] + 15
-                    )  # Add spacing between readings
+                    current_x += pill_total_width + pill_gap
                 else:
-                    # No dot, use blue for entire reading
+                    bbox = draw.textbbox((0, 0), reading, font=self.font_medium)
+                    width = bbox[2] - bbox[0]
+                    pill_total_width = width + (2 * pill_padding_x)
+
+                    if (
+                        current_x + pill_total_width > max_reading_x
+                        and current_x != right_x
+                    ):
+                        y += reading_line_step
+                        current_x = right_x
+
+                    _draw_text_background(
+                        current_x,
+                        y,
+                        width,
+                        bbox,
+                        pill_padding_x,
+                        pill_padding_y,
+                    )
                     draw.text(
-                        (current_x, right_y),
+                        (current_x, y),
                         reading,
                         font=self.font_medium,
                         fill=ACCENT_COLOR,
                     )
-                    bbox = draw.textbbox((0, 0), reading, font=self.font_medium)
-                    current_x += bbox[2] - bbox[0] + 15  # Add spacing between readings
-            right_y += 40 + vertical_spacing
+                    current_x += pill_total_width + pill_gap
+
+            return y + reading_line_step + vertical_spacing
+
+        # Draw katakana readings first (onyomi) - blue before dot, white after, remove dot
+        if kanji_data.get("katakana_readings"):
+            right_y = _draw_readings(kanji_data["katakana_readings"], right_y)
 
         # Draw hiragana readings second (kunyomi) - blue before dot, white after, remove dot
         if kanji_data.get("hiragana_readings"):
-            current_x = right_x
-            for i, reading in enumerate(kanji_data["hiragana_readings"]):
-                # Handle readings with dots - blue before dot, white after, remove dot
-                if "・" in reading or "." in reading:
-                    # Split by either type of dot
-                    if "・" in reading:
-                        parts = reading.split("・", 1)  # Split only on first dot
-                    else:
-                        parts = reading.split(".", 1)  # Split only on first dot
-
-                    # Draw the part before dot in blue
-                    draw.text(
-                        (current_x, right_y),
-                        parts[0],
-                        font=self.font_medium,
-                        fill=ACCENT_COLOR,
-                    )
-                    # Calculate width of first part
-                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_medium)
-                    current_x += bbox_before[2] - bbox_before[0]
-
-                    # Draw the part after dot in white (without the dot)
-                    draw.text(
-                        (current_x, right_y),
-                        parts[1],
-                        font=self.font_medium,
-                        fill=TEXT_COLOR,
-                    )
-                    # Calculate width of second part
-                    bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_medium)
-                    current_x += (
-                        bbox_after[2] - bbox_after[0] + 15
-                    )  # Add spacing between readings
-                else:
-                    # No dot, use blue for entire reading
-                    draw.text(
-                        (current_x, right_y),
-                        reading,
-                        font=self.font_medium,
-                        fill=ACCENT_COLOR,
-                    )
-                    bbox = draw.textbbox((0, 0), reading, font=self.font_medium)
-                    current_x += bbox[2] - bbox[0] + 15  # Add spacing between readings
-            right_y += 40 + vertical_spacing
+            right_y = _draw_readings(kanji_data["hiragana_readings"], right_y)
 
         # --- Compounds Box ---
         # Remove compounds label, start box directly
@@ -555,70 +575,87 @@ def parse_kanji_csv_file(file_path):
 
 
 def main():
-    """Main function to generate N2 kanji images from CSV file."""
+    """Generate kanji images from one or more CSV files."""
 
-    if len(sys.argv) != 2:
-        print("Usage: python3 generate_n2_kanji_images.py <kanji_csv_file>")
+    if len(sys.argv) == 1:
+        input_files = [
+            "kanji_n2.csv",
+            "kanji_n3.csv",
+            "kanji_n4.csv",
+            "kanji_n5.csv",
+        ]
+    elif len(sys.argv) == 2:
+        input_files = [sys.argv[1]]
+    else:
+        print("Usage: python3 generate_kanji_images.py [kanji_csv_file]")
+        print("\nIf no file is provided, the script processes:")
+        print("  kanji_n2.csv, kanji_n3.csv, kanji_n4.csv, kanji_n5.csv")
         print("\nExpected CSV format:")
         print("kanji,meaning,readings,compounds")
         print(
             '腕,"arm, ability, talent",ワン; うで,"右腕 (うわん) = right arm; 手腕 (しゅわん) = ability; ..."'
         )
-        print("\nThe script will create images in the JLPT-N2 folder.")
+        print("\nThe script will create images in JLPT-* folders.")
         return
 
-    input_file = sys.argv[1]
-
-    print("Parsing kanji CSV data...")
-    kanji_list = parse_kanji_csv_file(input_file)
-
-    if not kanji_list:
-        print("No valid kanji data found in the CSV file.")
-        return
-
-    print("Found {} kanji entries.".format(len(kanji_list)))
-
-    # Create output directory
-    # Determine output directory based on input
-    # pattern: kanji_xxx.csv -> JLPT-XXX
-    input_basename = os.path.splitext(os.path.basename(input_file))[0]
-
-    # Find first underscore and extract everything after it
-    if "_" in input_basename:
-        after_first_underscore = input_basename.split("_", 1)[1]
-        # Convert to uppercase and replace remaining underscores with hyphens
-        suffix = after_first_underscore.upper().replace("_", "-")
-        output_dir = "JLPT-{}".format(suffix)
-    else:
-        # Fallback if no underscore found
-        output_dir = "JLPT-{}".format(input_basename.upper())
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Generate images
     generator = KanjiImageGenerator()
-    successful = 0
-    failed = 0
 
-    for i, kanji_data in enumerate(kanji_list):
-        # Generate filename with zero-padding (5 digits like in N3)
-        file_number = i + 1
-        filename = "JLPT_{}_{:05d}.png".format(suffix, file_number)
-        output_path = os.path.join(output_dir, filename)
+    for input_file in input_files:
+        if not os.path.exists(input_file):
+            print("Error: Input file not found: {}".format(input_file))
+            if len(sys.argv) == 2:
+                return
+            continue
 
-        if generator.create_kanji_image(kanji_data, output_path):
-            successful += 1
+        print("\n=== Processing: {} ===".format(input_file))
+        print("Parsing kanji CSV data...")
+        kanji_list = parse_kanji_csv_file(input_file)
+
+        if not kanji_list:
+            print("No valid kanji data found in the CSV file.")
+            continue
+
+        print("Found {} kanji entries.".format(len(kanji_list)))
+
+        # Determine output directory based on input
+        # pattern: kanji_xxx.csv -> JLPT-XXX
+        input_basename = os.path.splitext(os.path.basename(input_file))[0]
+
+        # Find first underscore and extract everything after it
+        if "_" in input_basename:
+            after_first_underscore = input_basename.split("_", 1)[1]
+            # Convert to uppercase and replace remaining underscores with hyphens
+            suffix = after_first_underscore.upper().replace("_", "-")
         else:
-            failed += 1
-            print(
-                "Failed to create image for kanji: {}".format(
-                    kanji_data.get("kanji", "unknown")
-                )
-            )
+            # Fallback if no underscore found
+            suffix = input_basename.upper()
 
-    print("\n=== Generation Complete ===")
-    print("✓ Successfully created: {} images".format(successful))
-    print("✗ Failed: {} images".format(failed))
-    print("📁 Output directory: {}".format(output_dir))
+        output_dir = "JLPT-{}".format(suffix)
+        os.makedirs(output_dir, exist_ok=True)
+
+        successful = 0
+        failed = 0
+
+        for i, kanji_data in enumerate(kanji_list):
+            # Generate filename with zero-padding (5 digits like in N3)
+            file_number = i + 1
+            filename = "JLPT_{}_{:05d}.png".format(suffix, file_number)
+            output_path = os.path.join(output_dir, filename)
+
+            if generator.create_kanji_image(kanji_data, output_path):
+                successful += 1
+            else:
+                failed += 1
+                print(
+                    "Failed to create image for kanji: {}".format(
+                        kanji_data.get("kanji", "unknown")
+                    )
+                )
+
+        print("\n=== Generation Complete ({}) ===".format(input_file))
+        print("✓ Successfully created: {} images".format(successful))
+        print("✗ Failed: {} images".format(failed))
+        print("📁 Output directory: {}".format(output_dir))
 
 
 if __name__ == "__main__":
