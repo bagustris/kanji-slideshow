@@ -15,12 +15,13 @@ import csv
 import os
 import re
 import sys
+import argparse
 
 from PIL import Image, ImageDraw, ImageFont
 
-# Image configuration for PC wallpaper (1920x1080)
-IMAGE_WIDTH = 1920
-IMAGE_HEIGHT = 1080
+# Default image configuration (wallpaper baseline)
+BASE_IMAGE_WIDTH = 1920
+BASE_IMAGE_HEIGHT = 1080
 BACKGROUND_COLOR = (0, 0, 0, 255)  # Black background with alpha
 TEXT_COLOR = (255, 255, 255)  # White text
 COMPOUND_BOX_COLOR = (20, 20, 20, 255)  # Slightly lighter black for subtle contrast
@@ -37,11 +38,21 @@ READING_BG_COLOR = (45, 45, 45, 255)  # Subtle background for readings
 
 
 class KanjiImageGenerator:
-    def __init__(self):
+    def __init__(self, image_width=BASE_IMAGE_WIDTH, image_height=BASE_IMAGE_HEIGHT):
+        self.image_width = int(image_width)
+        self.image_height = int(image_height)
+        self.scale = min(
+            self.image_width / float(BASE_IMAGE_WIDTH),
+            self.image_height / float(BASE_IMAGE_HEIGHT),
+        )
         self.font_large = None
         self.font_medium = None
         self.font_small = None
         self._load_fonts()
+
+    def _s(self, px, minimum=1):
+        """Scale a pixel value from the 1920x1080 baseline."""
+        return max(int(round(px * self.scale)), minimum)
 
     def _load_fonts(self):
         """Load suitable fonts for Japanese characters."""
@@ -54,21 +65,22 @@ class KanjiImageGenerator:
             "/Windows/Fonts/msgothic.ttc",  # Windows
         ]
 
-        # Try to load fonts in different sizes - reduced for wallpaper use
+        # Try to load fonts in different sizes.
+        # Font sizes are scaled based on the chosen output resolution.
         for font_path in font_paths:
             if os.path.exists(font_path):
                 try:
                     self.font_large = ImageFont.truetype(
-                        font_path, 220
+                        font_path, self._s(220, minimum=32)
                     )  # Smaller main kanji
                     self.font_medium = ImageFont.truetype(
-                        font_path, 32
+                        font_path, self._s(32, minimum=12)
                     )  # Smaller meaning/readings
                     self.font_small = ImageFont.truetype(
-                        font_path, 24
-                    )  # Smaller compounds
+                        font_path, self._s(30, minimum=11)
+                    )  # Compounds (example words) - larger for readability
                     self.font_jis = ImageFont.truetype(
-                        font_path, 16
+                        font_path, self._s(16, minimum=9)
                     )  # Smaller JIS text
                     print("Successfully loaded font: {}".format(font_path))
                     return
@@ -173,29 +185,31 @@ class KanjiImageGenerator:
             return False
 
         # Create image
-        image = Image.new("RGBA", (IMAGE_WIDTH, IMAGE_HEIGHT), BACKGROUND_COLOR)
+        image = Image.new(
+            "RGBA", (self.image_width, self.image_height), BACKGROUND_COLOR
+        )
         draw = ImageDraw.Draw(image)
 
         kanji = kanji_data["kanji"]
 
         # --- Text Positioning ---
-        x_margin = 80
+        x_margin = self._s(80)
         # Center content vertically on the 1920x1080 canvas
         # Estimate total content height and center it
-        estimated_content_height = 400  # Approximate height of all content
-        y_center_offset = (IMAGE_HEIGHT - estimated_content_height) // 2
-        y_margin = max(50, y_center_offset)  # Ensure minimum margin
-        vertical_spacing = 20  # Additional vertical space between elements
+        estimated_content_height = self._s(400)  # Approximate height of all content
+        y_center_offset = (self.image_height - estimated_content_height) // 2
+        y_margin = max(self._s(50), y_center_offset)  # Ensure minimum margin
+        vertical_spacing = self._s(20)  # Additional vertical space between elements
 
         # Left alignment for all text elements
         left_x = x_margin
 
         # Draw the main Kanji character (large, left side) - centered vertically
-        kanji_y = y_margin + 30
+        kanji_y = y_margin + self._s(30)
         draw.text((left_x, kanji_y), kanji, font=self.font_large, fill=KANJI_COLOR)
 
         # Calculate position for right column (next to kanji with some spacing)
-        right_x = left_x + 350  # Position right column next to kanji with more space
+        right_x = left_x + self._s(350)  # Position right column next to kanji
         right_y = y_margin
 
         # Draw JIS code at top-right corner - aligned with top (skip if not available)
@@ -203,7 +217,7 @@ class KanjiImageGenerator:
             jis_text = kanji_data["jis_code"]
             bbox = draw.textbbox((0, 0), jis_text, font=self.font_jis)
             jis_width = bbox[2] - bbox[0]
-            jis_x = IMAGE_WIDTH - x_margin - jis_width
+            jis_x = self.image_width - x_margin - jis_width
             draw.text((jis_x, right_y), jis_text, font=self.font_jis, fill=TEXT_COLOR)
 
         # Draw meaning - left-aligned in right column (no label)
@@ -213,13 +227,13 @@ class KanjiImageGenerator:
             font=self.font_medium,
             fill=TEXT_COLOR,
         )
-        right_y += 45 + vertical_spacing
+        right_y += self._s(45) + vertical_spacing
 
-        pill_padding_x = 6
-        pill_padding_y = 4
-        pill_gap = 16
-        max_reading_x = IMAGE_WIDTH - x_margin
-        reading_line_step = 40
+        pill_padding_x = self._s(6)
+        pill_padding_y = self._s(4)
+        pill_gap = self._s(16)
+        max_reading_x = self.image_width - x_margin
+        reading_line_step = self._s(40)
 
         def _draw_text_background(x, y, text_width, text_bbox, padding_x, padding_y):
             """Draw a padded background behind text drawn at (x, y)."""
@@ -230,7 +244,7 @@ class KanjiImageGenerator:
             y1 = y + text_bbox[3] + padding_y
             try:
                 draw.rounded_rectangle(
-                    (x0, y0, x1, y1), radius=10, fill=READING_BG_COLOR
+                    (x0, y0, x1, y1), radius=self._s(10), fill=READING_BG_COLOR
                 )
             except Exception:
                 draw.rectangle((x0, y0, x1, y1), fill=READING_BG_COLOR)
@@ -330,27 +344,20 @@ class KanjiImageGenerator:
 
         # --- Compounds Box ---
         # Remove compounds label, start box directly
-        box_padding = 15
-        line_spacing = 30  # Fixed spacing between compound lines
+        box_padding = self._s(15)
+        line_spacing = self._s(38)  # More spacing to match larger compounds font
         box_x0 = right_x - box_padding  # Left-aligned with other text
         box_y0 = right_y + vertical_spacing
 
         # Calculate available box width more conservatively to prevent overflow
         available_width = (
-            IMAGE_WIDTH - right_x - x_margin - 20
+            self.image_width - right_x - x_margin - self._s(20)
         )  # Extra margin for safety
         max_box_width = available_width - (box_padding * 2)
 
         # Process compounds and handle text wrapping with colored components
         wrapped_compound_lines = []
         for compound in kanji_data["compounds"]:
-            # Store compound parts separately for colored rendering
-            compound_parts = {
-                "kanji": compound["kanji"],
-                "reading": compound["reading"],
-                "meaning": compound["meaning"],
-            }
-
             # Calculate widths of each component
             kanji_bbox = draw.textbbox((0, 0), compound["kanji"], font=self.font_small)
             kanji_width = kanji_bbox[2] - kanji_bbox[0]
@@ -362,7 +369,7 @@ class KanjiImageGenerator:
 
             # Check if kanji + reading + some meaning fits on one line
             kanji_reading_width = (
-                kanji_width + 8 + reading_width + 12
+                kanji_width + self._s(8) + reading_width + self._s(12)
             )  # Including spacing
             available_for_meaning = max_box_width - kanji_reading_width
 
@@ -439,7 +446,9 @@ class KanjiImageGenerator:
         # Calculate box height based on actual wrapped lines + ensure bottom is visible
         if wrapped_compound_lines:
             # Reserve space at bottom of image to ensure box is fully visible
-            max_available_height = IMAGE_HEIGHT - box_y0 - 30  # 30px from bottom edge
+            max_available_height = (
+                self.image_height - box_y0 - self._s(30)
+            )  # From bottom edge
             ideal_content_height = len(wrapped_compound_lines) * line_spacing
             actual_content_height = min(
                 ideal_content_height, max_available_height - (box_padding * 2)
@@ -451,11 +460,11 @@ class KanjiImageGenerator:
             box_y1 = box_y0 + (box_padding * 2) + 30  # Minimum height for empty box
 
         # Define the box dimensions
-        box_x1 = IMAGE_WIDTH - x_margin
+        box_x1 = self.image_width - x_margin
 
         # Draw the filled rectangle with visible borders
         draw.rectangle(
-            [box_x0, box_y0, box_x1, box_y1],
+            (box_x0, box_y0, box_x1, box_y1),
             fill=COMPOUND_BOX_COLOR,
             outline=TEXT_COLOR,
             width=2,
@@ -577,28 +586,70 @@ def parse_kanji_csv_file(file_path):
 def main():
     """Generate kanji images from one or more CSV files."""
 
-    if len(sys.argv) == 1:
+    def _detect_screen_size():
+        try:
+            import tkinter as tk
+
+            root = tk.Tk()
+            root.withdraw()
+            width = root.winfo_screenwidth()
+            height = root.winfo_screenheight()
+            root.destroy()
+            return int(width), int(height)
+        except Exception:
+            return None
+
+    parser = argparse.ArgumentParser(
+        description="Generate JLPT kanji wallpaper images from CSV files."
+    )
+    parser.add_argument(
+        "csv",
+        nargs="?",
+        help="Optional input CSV file. If omitted, processes kanji_n2.csv..kanji_n5.csv",
+    )
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=BASE_IMAGE_WIDTH,
+        help="Output image width in pixels (default: 1920)",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=BASE_IMAGE_HEIGHT,
+        help="Output image height in pixels (default: 1080)",
+    )
+    parser.add_argument(
+        "--screen",
+        action="store_true",
+        help="Auto-detect screen resolution (requires a GUI session).",
+    )
+
+    args = parser.parse_args()
+
+    if args.csv:
+        input_files = [args.csv]
+    else:
         input_files = [
             "kanji_n2.csv",
             "kanji_n3.csv",
             "kanji_n4.csv",
             "kanji_n5.csv",
         ]
-    elif len(sys.argv) == 2:
-        input_files = [sys.argv[1]]
-    else:
-        print("Usage: python3 generate_kanji_images.py [kanji_csv_file]")
-        print("\nIf no file is provided, the script processes:")
-        print("  kanji_n2.csv, kanji_n3.csv, kanji_n4.csv, kanji_n5.csv")
-        print("\nExpected CSV format:")
-        print("kanji,meaning,readings,compounds")
-        print(
-            '腕,"arm, ability, talent",ワン; うで,"右腕 (うわん) = right arm; 手腕 (しゅわん) = ability; ..."'
-        )
-        print("\nThe script will create images in JLPT-* folders.")
-        return
 
-    generator = KanjiImageGenerator()
+    if args.screen:
+        detected = _detect_screen_size()
+        if detected:
+            args.width, args.height = detected
+            print("Using detected screen size: {}x{}".format(args.width, args.height))
+        else:
+            print(
+                "Warning: Could not detect screen size; using {}x{}".format(
+                    args.width, args.height
+                )
+            )
+
+    generator = KanjiImageGenerator(image_width=args.width, image_height=args.height)
 
     for input_file in input_files:
         if not os.path.exists(input_file):
