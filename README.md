@@ -31,7 +31,7 @@ If run without CSV file, it will generate images for all JLPT levels (N5 to N2):
 python3 generate_kanji_images.py
 ```
 # Use as slideshow
-Use shotwell to set wallpaper slideshow. Information is given [here](https://bagustris.blogspot.com/2020/ ,.,12/belajar-kanji-otomatis-lewat-wallpaper.html) (In Indonesian language, right click translate to English).
+Use shotwell to set wallpaper slideshow. Information is given [here](https://bagustris.blogspot.com/2020/12/belajar-kanji-otomatis-lewat-wallpaper.html) (In Indonesian language, right click translate to English).
 
 To scale the image properly, use the following command:  
 
