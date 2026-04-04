@@ -7,7 +7,7 @@ kanji,meaning,readings,compounds
 下,"below, down, descend, give, low, inferior","カ, ゲ; した, しも, もと, さ.げる, さ.がる, くだ.る, くだ.り, くだ.す, -くだ.す, くだ.さる, お.ろす, お.りる","已下 (いげ) = not exceeding, and downward; 下る (さがる) = to hang down, to abate, to retire, to fall, to step back; 下げる (さげる) = to hang, to lower, to move back, to wear, to dismiss, to grant; 下さる (くださる) = to give, to confer; 下り (くだり) = down-train (going away from Tokyo)"
 中,"in, inside, middle, mean, center","チュウ; なか, うち, あた.る","空中 (くうちゅう) = sky, air; 集中 (しゅうちゅう) = concentration, convergence, centralization, integration, gathering together; 心中 (しんじゅう) = double suicide, lovers suicide; 真最中 (まっさいちゅう) = midst, middle of, height of; 真夜中 (まよなか) = dead of night, midnight"
 九,nine,"キュウ, ク; ここの, ここの.つ",九 (ここ) = nine
-二,"two, two radical (no.2)","ニ, ジ; ふた, ふた.つ, ふたた.び","二男 (じなん) = second son; 二子 (ふたご) = twins, a twin; 二 (ふう) = two; 二階 (にかい) = second floor, upstairs; 二重 (ふたえ) = double, two-fold, two layers, duplex"
+二,"two, two radical","ニ, ジ; ふた, ふた.つ, ふたた.び","二男 (じなん) = second son; 二子 (ふたご) = twins, a twin; 二 (ふう) = two; 二階 (にかい) = second floor, upstairs; 二重 (ふたえ) = double, two-fold, two layers, duplex"
 五,five,"ゴ; いつ, いつ.つ","五 (い) = five; 五十音 (ごじゅうおん) = the Japanese syllabary; 五分 (ごぶ) = half, 50%, tie, evenness, 5 parts, 5%; 四捨五入 (ししゃごにゅう) = rounding up (esp. fractions)"
 人,person,"ジン, ニン; ひと, -り, -と","悪人 (あくにん) = bad man, villain; 偉人 (いじん) = great man; 一人前 (ひとりまえ) = adult, full manhood or womanhood, one helping, one portion; 恩人 (おんじん) = benefactor, patron; 外国人 (がいこくじん) = foreigner"
 今,now,"コン, キン; いま","今 (いま) = now, the present time, just now, soon, immediately, (one) more; 今に (いまに) = before long, even now; 今回 (こんかい) = now, this time, lately; 今月 (こんげつ) = this month; 今後 (こんご) = from now on, hereafter"
@@ -16,7 +16,7 @@ kanji,meaning,readings,compounds
 何,what,"カ; なに, なん, なに-, なん-","何か (なんか) = something; 何しろ (なにしろ) = at any rate, anyhow, anyway, in any case; 何だか (なんだか) = (a) little, somewhat, somehow; 何て (なんて) = how ..!, what ..!, what (questioning); 何と (なんと) = what, how, whatever"
 先,"before, ahead, previous, future, precedence","セン; さき, ま.ず","勤め先 (つとめさき) = place of work; 口先 (くちさき) = lip service, mere words, professions, lips, mouth, snout, proboscis; 最先端 (さいせんたん) = leading edge, at the forefront, ultra-fine; 真っ先 (まっさき) = the head, the foremost, beginning; 先決 (せんけつ) = previous decision, deciding in advance"
 入,"enter, insert","ニュウ, ジュ; い.る, -い.る, -い.り, い.れる, -い.れ, はい.る","加入 (かにゅう) = becoming a member, joining, entry, admission, subscription, affiliation, adherence, signing; 落ち入る (おちいる) = to fall, to trap, to cave in, to collapse; 気に入る (きにいる) = to be pleased with, to suit; 記入 (きにゅう) = entry, filling in of forms; 購入 (こうにゅう) = purchase, buy"
-八,"eight, eight radical (no. 12)","ハチ; や, や.つ, やっ.つ, よう",八つあたり (やつあたり) = outburst of anger; 八百屋 (やおや) = greengrocer; 八 (や) = eight
+八,"eight, eight radical","ハチ; や, や.つ, やっ.つ, よう",八つあたり (やつあたり) = outburst of anger; 八百屋 (やおや) = greengrocer; 八 (や) = eight
 六,six,"ロク, リク; む, む.つ, むっ.つ, むい",六 (むう) = six
 円,"circle, yen, round","エン; まる.い, まる, まど, まど.か, まろ.やか","一円 (いちえん) = whole district, one yen, throughout; 円 (まる) = Yen, money, circle; 円安 (えんやす) = cheap yen; 円高 (えんだか) = high-valued yen, exchange in favor (favour) of the yen; 円盤 (えんばん) = disk, discus, platter, flying saucer"
 出,"exit, leave","シュツ, スイ; で.る, -で, だ.す, -だ.す, い.でる, い.だす","演出 (えんしゅつ) = production (eg play), direction; 家出 (いえで) = running away from home, leaving home; 外出 (そとで) = outing, trip, going out; 割出す (わりだす) = to calculate, to compute, to infer; 見出し (みだし) = heading, caption, subtitle, index"
@@ -47,7 +47,7 @@ kanji,meaning,readings,compounds
 小,"little, small","ショウ; ちい.さい, こ-, お-, さ-","最小 (さいしょう) = smallest, least; 最小限 (さいしょうげん) = minimum, lowest; 縮小 (しゅくしょう) = reduction, curtailment; 小さい (ちいさい) = small, little, tiny; 小雨 (こあめ) = light rain, drizzle"
 少,"few, little","ショウ; すく.ない, すこ.し","減少 (げんしょう) = decrease, reduction, decline; 少数点 (しょうすうてん) = decimal point, radix point; 少し (すこし) = small quantity, little, few, something, little while, short distance; 少数 (しょうすう) = minority, few; 少年 (しょうねん) = boys, juveniles"
 山,mountain,"サン, セン; やま","火山 (かざん) = volcano; 鉱山 (こうざん) = mine (ore); 山 (やま) = mountain, pile, heap; 山登り (やまのぼり) = mountain climbing, mountaineering; 山脈 (やまなみ) = mountain range"
-川,"stream, river, river or 3-stroke river radical (no. 47)",セン; かわ,"河川 (かせん) = rivers; 小川 (おがわ) = streamlet, brook; 川口 (かわぐち) = mouth of river, estuary; 川原 (かわはら) = dry river bed, river beach"
+川,"stream, river, 3-stroke river radical",セン; かわ,"河川 (かせん) = rivers; 小川 (おがわ) = streamlet, brook; 川口 (かわぐち) = mouth of river, estuary; 川原 (かわはら) = dry river bed, river beach"
 左,left,"サ, シャ; ひだり","左 (ひだり) = left, left hand side; 左右 (さゆう) = left and right, influence, control, domination; 左手 (ひだりて) = left hand; 左遷 (させん) = demotion, degradation; 左翼 (さよく) = left wing"
 年,"year, counter for years",ネン; とし,"学年 (がくねん) = year in school, grade in school; 去年 (こぞ) = last year; 御年玉 (おとしだま) = New Year's gift; 再来年 (さらいねん) = year after next; 昨年 (さくねん) = last year"
 店,"store, shop","テン; みせ, たな","開店 (かいてん) = (grand) opening of shop; 喫茶店 (きっさてん) = coffee lounge, coffee shop, (rather formal) cafe; 支店 (してん) = branch store (office); 書店 (しょてん) = bookshop, bookstore; 商店 (しょうてん) = shop, business firm"

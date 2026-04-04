@@ -110,10 +110,10 @@ class KanjiImageGenerator:
         Returns:
             dict: Parsed kanji data
         """
-        kanji = row["kanji"].strip()
-        meaning = row["meaning"].strip()
-        readings_str = row["readings"].strip()
-        compounds_str = row["compounds"].strip()
+        kanji = self._get_csv_value(row, "kanji")
+        meaning = self._get_csv_value(row, "meaning")
+        readings_str = self._get_csv_value(row, "readings")
+        compounds_str = self._get_csv_value(row, "compounds")
 
         # Parse readings - separate hiragana and katakana
         hiragana_readings = []
@@ -171,6 +171,18 @@ class KanjiImageGenerator:
             "katakana_readings": katakana_readings,
             "compounds": compounds,
         }
+
+    @staticmethod
+    def _get_csv_value(row, field_name):
+        """Return a normalized CSV field value or raise a clear error."""
+        if field_name not in row:
+            raise KeyError("Missing required CSV column: {}".format(field_name))
+
+        value = row[field_name]
+        if value is None:
+            return ""
+
+        return value.strip()
 
     def create_kanji_image(self, kanji_data, output_path):
         """
@@ -542,7 +554,7 @@ class KanjiImageGenerator:
             return False
 
 
-def parse_kanji_csv_file(file_path):
+def parse_kanji_csv_file(file_path, parser=None):
     """
     Parse the CSV file containing kanji data.
 
@@ -557,7 +569,7 @@ def parse_kanji_csv_file(file_path):
         return []
 
     parsed_kanji = []
-    generator = KanjiImageGenerator()
+    parser = parser or KanjiImageGenerator()
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -567,7 +579,7 @@ def parse_kanji_csv_file(file_path):
                 reader, start=2
             ):  # Start at 2 since header is row 1
                 try:
-                    kanji_data = generator.parse_csv_entry(row)
+                    kanji_data = parser.parse_csv_entry(row)
                     if kanji_data and kanji_data.get("kanji"):
                         parsed_kanji.append(kanji_data)
                     else:
@@ -627,6 +639,9 @@ def main():
 
     args = parser.parse_args()
 
+    if args.width <= 0 or args.height <= 0:
+        parser.error("--width and --height must be positive integers")
+
     if args.csv:
         input_files = [args.csv]
     else:
@@ -654,13 +669,13 @@ def main():
     for input_file in input_files:
         if not os.path.exists(input_file):
             print("Error: Input file not found: {}".format(input_file))
-            if len(sys.argv) == 2:
+            if args.csv:
                 return
             continue
 
         print("\n=== Processing: {} ===".format(input_file))
         print("Parsing kanji CSV data...")
-        kanji_list = parse_kanji_csv_file(input_file)
+        kanji_list = parse_kanji_csv_file(input_file, parser=generator)
 
         if not kanji_list:
             print("No valid kanji data found in the CSV file.")
