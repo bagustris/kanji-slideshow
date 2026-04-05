@@ -1,5 +1,5 @@
 # Kanji Slideshow  
-Automatic learning kanji through wallpaper slideshow. An example is below.  
+Automatic learning kanji through a wallpaper slideshow. An example is below.  
 
 ![Example](./JLPT-N2-SAMPLE/JLPT_N2-SAMPLE_00007.png)
 
@@ -30,11 +30,14 @@ If run without CSV file, it will generate images for all JLPT levels (N5 to N2):
 ```bash
 python3 generate_kanji_images.py
 ```
-# Use as slideshow
-Use shotwell to set wallpaper slideshow. Information is given [here](https://bagustris.blogspot.com/2020/12/belajar-kanji-otomatis-lewat-wallpaper.html) (In Indonesian language, right click translate to English).
+# Use as a slideshow
+Use Shotwell to set a wallpaper slideshow. Information is given [here](https://bagustris.blogspot.com/2020/12/belajar-kanji-otomatis-lewat-wallpaper.html) (In Indonesian language, right click translate to English).
 
 To scale the image properly, use the following command:  
 
 ```bash
 gsettings set org.gnome.desktop.background picture-options "scaled"
 ```
+
+# Use as a flash card   
+Just use your **image viewer** app inside one of the folders (e.g., JLPT-N5) and use left and right arrow to move from one kanji image to the next ones. 
