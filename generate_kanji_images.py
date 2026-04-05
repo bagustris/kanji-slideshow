@@ -32,6 +32,7 @@ COMPOUND_READING_COLOR = (
     0,
 )  # Orange color for hiragana readings in compounds
 ACCENT_COLOR = (100, 149, 237)  # Cornflower blue for section headers
+HIGHLIGHT_COLOR = (80, 200, 255)  # Bright blue for target kanji in compounds
 KANJI_COLOR = (255, 255, 255)  # White for main kanji
 STROKE_ORDER_COLOR = (128, 128, 128)  # Gray for stroke order info
 READING_BG_COLOR = (45, 45, 45, 255)  # Subtle background for readings
@@ -57,10 +58,11 @@ class KanjiImageGenerator:
     def _load_fonts(self):
         """Load suitable fonts for Japanese characters."""
         font_paths = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Ubuntu/Debian
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Light.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Alternative path
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Fallback
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",  # Prefer Bold for better visibility
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Fallback Bold
             "/System/Library/Fonts/Hiragino Sans GB.ttc",  # macOS
             "/Windows/Fonts/msgothic.ttc",  # Windows
         ]
@@ -71,17 +73,20 @@ class KanjiImageGenerator:
             if os.path.exists(font_path):
                 try:
                     self.font_large = ImageFont.truetype(
-                        font_path, self._s(220, minimum=32)
-                    )  # Smaller main kanji
+                        font_path, self._s(300, minimum=40)
+                    )  # Main kanji (increased to 300px)
                     self.font_medium = ImageFont.truetype(
-                        font_path, self._s(32, minimum=12)
-                    )  # Smaller meaning/readings
+                        font_path, self._s(42, minimum=15)
+                    )  # Meaning (increased to 42px)
+                    self.font_reading = ImageFont.truetype(
+                        font_path, self._s(42, minimum=15)
+                    )  # Readings (increased to 42px)
                     self.font_small = ImageFont.truetype(
-                        font_path, self._s(30, minimum=11)
-                    )  # Compounds (example words) - larger for readability
+                        font_path, self._s(42, minimum=15)
+                    )  # Compounds (42px)
                     self.font_jis = ImageFont.truetype(
                         font_path, self._s(16, minimum=9)
-                    )  # Smaller JIS text
+                    )  # JIS code
                     print("Successfully loaded font: {}".format(font_path))
                     return
                 except Exception as e:
@@ -95,6 +100,7 @@ class KanjiImageGenerator:
         try:
             self.font_large = ImageFont.load_default()
             self.font_medium = ImageFont.load_default()
+            self.font_reading = ImageFont.load_default()
             self.font_small = ImageFont.load_default()
             self.font_jis = ImageFont.load_default()
         except Exception:
@@ -204,6 +210,22 @@ class KanjiImageGenerator:
 
         kanji = kanji_data["kanji"]
 
+        # Collect target readings for highlighting in compounds
+        target_readings = []
+        all_raw_readings = kanji_data.get("hiragana_readings", []) + kanji_data.get("katakana_readings", [])
+        for r in all_raw_readings:
+            # Remove okurigana markers (dot or anything after)
+            clean_r = re.split(r"[.・]", r)[0].strip()
+            if not clean_r:
+                continue
+            # Convert to hiragana for matching (compound readings in CSV are usually hiragana)
+            h_r = "".join(
+                chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c for c in clean_r
+            )
+            target_readings.append(h_r)
+        # Sort by length descending to match longest possible reading first
+        target_readings = sorted(list(set(target_readings)), key=len, reverse=True)
+
         # --- Text Positioning ---
         x_margin = self._s(80)
         # Center content vertically on the 1920x1080 canvas
@@ -239,13 +261,13 @@ class KanjiImageGenerator:
             font=self.font_medium,
             fill=TEXT_COLOR,
         )
-        right_y += self._s(45) + vertical_spacing
+        right_y += self._s(55) + vertical_spacing
 
         pill_padding_x = self._s(6)
         pill_padding_y = self._s(4)
         pill_gap = self._s(16)
         max_reading_x = self.image_width - x_margin
-        reading_line_step = self._s(40)
+        reading_line_step = self._s(55)
 
         def _draw_text_background(x, y, text_width, text_bbox, padding_x, padding_y):
             """Draw a padded background behind text drawn at (x, y)."""
@@ -272,8 +294,8 @@ class KanjiImageGenerator:
                     else:
                         parts = reading.split(".", 1)
 
-                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_medium)
-                    bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_medium)
+                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_reading)
+                    bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_reading)
                     width_before = bbox_before[2] - bbox_before[0]
                     width_after = bbox_after[2] - bbox_after[0]
 
@@ -302,22 +324,22 @@ class KanjiImageGenerator:
                         pill_padding_y,
                     )
 
-                    # Draw in two colors (existing behavior), but share one background.
+                    # Before dot: bright blue (the kanji reading); after dot: white (okurigana)
                     draw.text(
                         (current_x, y),
                         parts[0],
-                        font=self.font_medium,
-                        fill=ACCENT_COLOR,
+                        font=self.font_reading,
+                        fill=HIGHLIGHT_COLOR,
                     )
                     draw.text(
                         (current_x + width_before, y),
                         parts[1],
-                        font=self.font_medium,
+                        font=self.font_reading,
                         fill=TEXT_COLOR,
                     )
                     current_x += pill_total_width + pill_gap
                 else:
-                    bbox = draw.textbbox((0, 0), reading, font=self.font_medium)
+                    bbox = draw.textbbox((0, 0), reading, font=self.font_reading)
                     width = bbox[2] - bbox[0]
                     pill_total_width = width + (2 * pill_padding_x)
 
@@ -339,25 +361,25 @@ class KanjiImageGenerator:
                     draw.text(
                         (current_x, y),
                         reading,
-                        font=self.font_medium,
-                        fill=ACCENT_COLOR,
+                        font=self.font_reading,
+                        fill=HIGHLIGHT_COLOR,
                     )
                     current_x += pill_total_width + pill_gap
 
             return y + reading_line_step + vertical_spacing
 
-        # Draw katakana readings first (onyomi) - blue before dot, white after, remove dot
+        # Draw katakana readings first (onyomi)
         if kanji_data.get("katakana_readings"):
             right_y = _draw_readings(kanji_data["katakana_readings"], right_y)
 
-        # Draw hiragana readings second (kunyomi) - blue before dot, white after, remove dot
+        # Draw hiragana readings second (kunyomi)
         if kanji_data.get("hiragana_readings"):
             right_y = _draw_readings(kanji_data["hiragana_readings"], right_y)
 
         # --- Compounds Box ---
         # Remove compounds label, start box directly
         box_padding = self._s(15)
-        line_spacing = self._s(38)  # More spacing to match larger compounds font
+        line_spacing = self._s(55)  # Increased spacing for larger compound font
         box_x0 = right_x - box_padding  # Left-aligned with other text
         box_y0 = right_y + vertical_spacing
 
@@ -495,31 +517,80 @@ class KanjiImageGenerator:
                     and line_parts["meaning"]
                 ):
                     # Full compound line with all parts - no brackets or equals sign
-                    # Draw kanji part (white)
-                    draw.text(
-                        (current_x, compound_y),
-                        line_parts["kanji"],
-                        font=self.font_small,
-                        fill=COMPOUND_TEXT_COLOR,
-                    )
-                    kanji_bbox = draw.textbbox(
-                        (0, 0), line_parts["kanji"], font=self.font_small
-                    )
-                    current_x += kanji_bbox[2] - kanji_bbox[0] + 8  # Add spacing
+                    # Draw kanji part character by character, highlighting target kanji
+                    target_kanji = kanji_data["kanji"]
+                    compound_has_target = target_kanji in line_parts["kanji"]
+                    for char in line_parts["kanji"]:
+                        char_color = HIGHLIGHT_COLOR if char == target_kanji else COMPOUND_TEXT_COLOR
+                        draw.text(
+                            (current_x, compound_y),
+                            char,
+                            font=self.font_small,
+                            fill=char_color,
+                        )
+                        char_bbox = draw.textbbox((0, 0), char, font=self.font_small)
+                        current_x += char_bbox[2] - char_bbox[0]
+                    current_x += self._s(8)  # spacing after kanji word
 
-                    # Draw reading part (orange) - no brackets
-                    draw.text(
-                        (current_x, compound_y),
-                        line_parts["reading"],
-                        font=self.font_small,
-                        fill=COMPOUND_READING_COLOR,
-                    )
-                    reading_bbox = draw.textbbox(
-                        (0, 0), line_parts["reading"], font=self.font_small
-                    )
-                    current_x += (
-                        reading_bbox[2] - reading_bbox[0] + 12
-                    )  # Add more spacing before meaning
+                    # Draw reading part: orange with blue highlight for target kanji reading
+                    reading_text = line_parts["reading"]
+
+                    # Find all non-overlapping matches
+                    reading_matches = []
+                    for tr in target_readings:
+                        if not tr:
+                            continue
+                        start_search = 0
+                        while True:
+                            idx = reading_text.find(tr, start_search)
+                            if idx == -1:
+                                break
+                            # Check for overlap
+                            if not any(
+                                idx < e and idx + len(tr) > s for s, e in reading_matches
+                            ):
+                                reading_matches.append((idx, idx + len(tr)))
+                            start_search = idx + 1
+
+                    reading_matches.sort()
+
+                    # Draw the reading segments
+                    last_idx = 0
+                    for start, end in reading_matches:
+                        if start > last_idx:
+                            seg = reading_text[last_idx:start]
+                            draw.text(
+                                (current_x, compound_y),
+                                seg,
+                                font=self.font_small,
+                                fill=COMPOUND_READING_COLOR,
+                            )
+                            bbox = draw.textbbox((0, 0), seg, font=self.font_small)
+                            current_x += bbox[2] - bbox[0]
+
+                        seg = reading_text[start:end]
+                        draw.text(
+                            (current_x, compound_y),
+                            seg,
+                            font=self.font_small,
+                            fill=HIGHLIGHT_COLOR,
+                        )
+                        bbox = draw.textbbox((0, 0), seg, font=self.font_small)
+                        current_x += bbox[2] - bbox[0]
+                        last_idx = end
+
+                    if last_idx < len(reading_text):
+                        seg = reading_text[last_idx:]
+                        draw.text(
+                            (current_x, compound_y),
+                            seg,
+                            font=self.font_small,
+                            fill=COMPOUND_READING_COLOR,
+                        )
+                        bbox = draw.textbbox((0, 0), seg, font=self.font_small)
+                        current_x += bbox[2] - bbox[0]
+
+                    current_x += 12  # Add more spacing before meaning
 
                     # Draw meaning part (white) - no equals sign
                     draw.text(
