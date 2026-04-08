@@ -190,6 +190,38 @@ class KanjiImageGenerator:
 
         return value.strip()
 
+    def _truncate_text(self, text, font, max_width, draw):
+        """Truncate text to fit max_width by removing comma-separated segments or using ellipsis."""
+        if not text:
+            return ""
+
+        # Initial check
+        bbox = draw.textbbox((0, 0), text, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            return text
+
+        # Try removing segments separated by commas
+        parts = [p.strip() for p in text.split(",")]
+        while len(parts) > 1:
+            parts.pop()
+            truncated = ", ".join(parts)
+            if not truncated:
+                break
+            bbox = draw.textbbox((0, 0), truncated, font=font)
+            if bbox[2] - bbox[0] <= max_width:
+                return truncated
+
+        # If still too long or no commas, hard truncate with ellipsis
+        current_text = parts[0] if parts else text
+        while len(current_text) > 0:
+            test_text = current_text + "..."
+            bbox = draw.textbbox((0, 0), test_text, font=font)
+            if bbox[2] - bbox[0] <= max_width:
+                return test_text
+            current_text = current_text[:-1]
+
+        return ""
+
     def create_kanji_image(self, kanji_data, output_path):
         """
         Create a kanji wallpaper image with the specified layout.
@@ -257,9 +289,13 @@ class KanjiImageGenerator:
             draw.text((jis_x, right_y), jis_text, font=self.font_jis, fill=TEXT_COLOR)
 
         # Draw meaning - left-aligned in right column (no label)
+        max_meaning_width = self.image_width - right_x - x_margin
+        truncated_meaning = self._truncate_text(
+            kanji_data["meaning"], self.font_medium, max_meaning_width, draw
+        )
         draw.text(
             (right_x, right_y),
-            kanji_data["meaning"],
+            truncated_meaning,
             font=self.font_medium,
             fill=TEXT_COLOR,
         )
@@ -393,101 +429,43 @@ class KanjiImageGenerator:
         )  # Extra margin for safety
         max_box_width = available_width - (box_padding * 2)
 
-        # Process compounds and handle text wrapping with colored components
-        wrapped_compound_lines = []
+        # Process compounds - ensure each fits on one line with truncation
+        processed_compounds = []
         for compound in kanji_data["compounds"]:
-            # Calculate widths of each component
             kanji_bbox = draw.textbbox((0, 0), compound["kanji"], font=self.font_small)
             kanji_width = kanji_bbox[2] - kanji_bbox[0]
-
             reading_bbox = draw.textbbox(
                 (0, 0), compound["reading"], font=self.font_small
             )
             reading_width = reading_bbox[2] - reading_bbox[0]
 
-            # Check if kanji + reading + some meaning fits on one line
-            kanji_reading_width = (
-                kanji_width + self._s(8) + reading_width + self._s(12)
-            )  # Including spacing
-            available_for_meaning = max_box_width - kanji_reading_width
+            # Width for brackets and spacing
+            extra_width = (
+                kanji_width
+                + self._s(8)  # Spacing after kanji
+                + self._s(20)  # Brackets width approx
+                + reading_width
+                + self._s(24)  # Spacing before meaning
+            )
+            available_for_meaning = max_box_width - extra_width
 
-            # Try to fit as much meaning as possible on the first line
-            meaning_words = compound["meaning"].split()
-            first_line_meaning = ""
-            remaining_meaning = ""
+            # Truncate meaning to fit the remaining space
+            truncated_meaning = self._truncate_text(
+                compound["meaning"], self.font_small, available_for_meaning, draw
+            )
 
-            for i, word in enumerate(meaning_words):
-                test_meaning = (
-                    first_line_meaning + (" " if first_line_meaning else "") + word
-                )
-                meaning_bbox = draw.textbbox((0, 0), test_meaning, font=self.font_small)
-                meaning_width = meaning_bbox[2] - meaning_bbox[0]
+            processed_compounds.append(
+                {
+                    "kanji": compound["kanji"],
+                    "reading": compound["reading"],
+                    "meaning": truncated_meaning,
+                }
+            )
 
-                if meaning_width <= available_for_meaning * 0.9:  # Conservative limit
-                    first_line_meaning = test_meaning
-                else:
-                    # This word doesn't fit, put remaining words on next lines
-                    remaining_meaning = " ".join(meaning_words[i:])
-                    break
-            else:
-                # All meaning words fit on first line
-                first_line_meaning = compound["meaning"]
-                remaining_meaning = ""
-
-            # Add the first line with kanji, reading, and partial meaning
-            if first_line_meaning:
-                wrapped_compound_lines.append(
-                    {
-                        "kanji": compound["kanji"],
-                        "reading": compound["reading"],
-                        "meaning": first_line_meaning,
-                    }
-                )
-            else:
-                # Even first word doesn't fit, just put kanji and reading
-                wrapped_compound_lines.append(
-                    {
-                        "kanji": compound["kanji"],
-                        "reading": compound["reading"],
-                        "meaning": "",
-                    }
-                )
-                remaining_meaning = compound["meaning"]
-
-            # Handle remaining meaning on subsequent lines
-            if remaining_meaning:
-                # Split remaining meaning into lines that fit
-                remaining_words = remaining_meaning.split()
-                current_line = ""
-
-                for word in remaining_words:
-                    test_line = current_line + (" " if current_line else "") + word
-                    test_bbox = draw.textbbox((0, 0), test_line, font=self.font_small)
-                    test_width = test_bbox[2] - test_bbox[0]
-
-                    if test_width <= max_box_width * 0.9:
-                        current_line = test_line
-                    else:
-                        # Line is full, save it and start new line
-                        if current_line:
-                            wrapped_compound_lines.append(
-                                {"kanji": "", "reading": "", "meaning": current_line}
-                            )
-                        current_line = word
-
-                # Add the last line
-                if current_line:
-                    wrapped_compound_lines.append(
-                        {"kanji": "", "reading": "", "meaning": current_line}
-                    )
-
-        # Calculate box height based on actual wrapped lines + ensure bottom is visible
-        if wrapped_compound_lines:
-            # Reserve space at bottom of image to ensure box is fully visible
-            max_available_height = (
-                self.image_height - box_y0 - self._s(30)
-            )  # From bottom edge
-            ideal_content_height = len(wrapped_compound_lines) * line_spacing
+        # Calculate box height based on actual compounds
+        if processed_compounds:
+            max_available_height = self.image_height - box_y0 - self._s(30)
+            ideal_content_height = len(processed_compounds) * line_spacing
             actual_content_height = min(
                 ideal_content_height, max_available_height - (box_padding * 2)
             )
@@ -495,7 +473,7 @@ class KanjiImageGenerator:
             box_height = actual_content_height + (box_padding * 2)
             box_y1 = box_y0 + box_height
         else:
-            box_y1 = box_y0 + (box_padding * 2) + 30  # Minimum height for empty box
+            box_y1 = box_y0 + (box_padding * 2) + 30
 
         # Define the box dimensions
         box_x1 = self.image_width - x_margin
@@ -508,144 +486,120 @@ class KanjiImageGenerator:
             width=2,
         )
 
-        # Now draw the wrapped compound text with colored components
-        if wrapped_compound_lines:
+        # Now draw the compound text with colored components
+        if processed_compounds:
             compound_y = box_y0 + box_padding
-            for line_parts in wrapped_compound_lines:
+            for compound in processed_compounds:
                 current_x = right_x
 
-                # Handle different line types
-                if (
-                    line_parts["kanji"]
-                    and line_parts["reading"]
-                    and line_parts["meaning"]
-                ):
-                    # Full compound line with all parts - reading enclosed in brackets
-                    # Draw kanji part character by character, highlighting target kanji
-                    target_kanji = kanji_data["kanji"]
-                    compound_has_target = target_kanji in line_parts["kanji"]
-                    for char in line_parts["kanji"]:
-                        char_color = (
-                            HIGHLIGHT_COLOR
-                            if char == target_kanji
-                            else COMPOUND_READING_COLOR
-                        )
-                        draw.text(
-                            (current_x, compound_y),
-                            char,
-                            font=self.font_small,
-                            fill=char_color,
-                        )
-                        char_bbox = draw.textbbox((0, 0), char, font=self.font_small)
-                        current_x += char_bbox[2] - char_bbox[0]
-                    current_x += self._s(8)  # spacing after kanji word
-
-                    # Draw reading part in white brackets (learning kanji and okurigana in blue)
-                    reading_text = line_parts["reading"]
-
-                    # Draw opening bracket in white
+                # 1. Draw kanji part: Highlight target kanji in blue, others in orange
+                target_kanji = kanji_data["kanji"]
+                for char in compound["kanji"]:
+                    char_color = (
+                        HIGHLIGHT_COLOR
+                        if char == target_kanji
+                        else COMPOUND_READING_COLOR
+                    )
                     draw.text(
                         (current_x, compound_y),
-                        "(",
+                        char,
                         font=self.font_small,
-                        fill=COMPOUND_TEXT_COLOR,
+                        fill=char_color,
                     )
-                    bbox = draw.textbbox((0, 0), "(", font=self.font_small)
-                    current_x += bbox[2] - bbox[0]
+                    char_bbox = draw.textbbox((0, 0), char, font=self.font_small)
+                    current_x += char_bbox[2] - char_bbox[0]
+                current_x += self._s(8)
 
-                    # Find all non-overlapping matches within reading_text (no brackets)
-                    reading_matches = []
-                    for tr in target_readings:
-                        if not tr:
-                            continue
-                        start_search = 0
-                        while True:
-                            idx = reading_text.find(tr, start_search)
-                            if idx == -1:
-                                break
-                            if not any(
-                                idx < e and idx + len(tr) > s
-                                for s, e in reading_matches
-                            ):
-                                reading_matches.append((idx, idx + len(tr)))
-                            start_search = idx + 1
+                # 2. Draw reading part: brackets in white, target readings in blue, others in orange
+                reading_text = compound["reading"]
 
-                    reading_matches.sort()
+                # Draw opening bracket in white
+                draw.text(
+                    (current_x, compound_y),
+                    "(",
+                    font=self.font_small,
+                    fill=COMPOUND_TEXT_COLOR,
+                )
+                bbox = draw.textbbox((0, 0), "(", font=self.font_small)
+                current_x += bbox[2] - bbox[0]
 
-                    # Draw the reading segments: matched parts in blue, others in orange
-                    last_idx = 0
-                    for start, end in reading_matches:
-                        if start > last_idx:
-                            seg = reading_text[last_idx:start]
-                            draw.text(
-                                (current_x, compound_y),
-                                seg,
-                                font=self.font_small,
-                                fill=COMPOUND_READING_COLOR,
-                            )
-                            bbox = draw.textbbox((0, 0), seg, font=self.font_small)
-                            current_x += bbox[2] - bbox[0]
+                # Find matches for target readings
+                reading_matches = []
+                for tr in target_readings:
+                    if not tr:
+                        continue
+                    start_search = 0
+                    while True:
+                        idx = reading_text.find(tr, start_search)
+                        if idx == -1:
+                            break
+                        if not any(
+                            idx < e and idx + len(tr) > s for s, e in reading_matches
+                        ):
+                            reading_matches.append((idx, idx + len(tr)))
+                        start_search = idx + 1
+                reading_matches.sort()
 
-                        seg = reading_text[start:end]
+                # Draw reading segments: matched parts in blue, others in orange
+                last_idx = 0
+                for start, end in reading_matches:
+                    if start > last_idx:
+                        seg = reading_text[last_idx:start]
                         draw.text(
                             (current_x, compound_y),
                             seg,
                             font=self.font_small,
-                            fill=HIGHLIGHT_COLOR,
+                            fill=COMPOUND_READING_COLOR,
                         )
                         bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                         current_x += bbox[2] - bbox[0]
-                        last_idx = end
 
-                    # Draw remaining text after last match (okurigana or non-matched reading)
-                    if last_idx < len(reading_text):
-                        remaining = reading_text[last_idx:]
-                        remaining_color = (
-                            HIGHLIGHT_COLOR if reading_matches else COMPOUND_READING_COLOR
-                        )
-                        draw.text(
-                            (current_x, compound_y),
-                            remaining,
-                            font=self.font_small,
-                            fill=remaining_color,
-                        )
-                        bbox = draw.textbbox((0, 0), remaining, font=self.font_small)
-                        current_x += bbox[2] - bbox[0]
-
-                    # Draw closing bracket in white
+                    seg = reading_text[start:end]
                     draw.text(
                         (current_x, compound_y),
-                        ")",
+                        seg,
                         font=self.font_small,
-                        fill=COMPOUND_TEXT_COLOR,
+                        fill=HIGHLIGHT_COLOR,
                     )
-                    bbox = draw.textbbox((0, 0), ")", font=self.font_small)
+                    bbox = draw.textbbox((0, 0), seg, font=self.font_small)
+                    current_x += bbox[2] - bbox[0]
+                    last_idx = end
+
+                if last_idx < len(reading_text):
+                    seg = reading_text[last_idx:]
+                    draw.text(
+                        (current_x, compound_y),
+                        seg,
+                        font=self.font_small,
+                        fill=COMPOUND_READING_COLOR,
+                    )
+                    bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
 
-                    current_x += 12  # Add more spacing before meaning
+                # Draw closing bracket in white
+                draw.text(
+                    (current_x, compound_y),
+                    ")",
+                    font=self.font_small,
+                    fill=COMPOUND_TEXT_COLOR,
+                )
+                bbox = draw.textbbox((0, 0), ")", font=self.font_small)
+                current_x += bbox[2] - bbox[0]
 
-                    # Draw meaning part (white) - no equals sign
-                    draw.text(
-                        (current_x, compound_y),
-                        line_parts["meaning"],
-                        font=self.font_small,
-                        fill=COMPOUND_TEXT_COLOR,
-                    )
+                current_x += self._s(24)
 
-                elif line_parts["meaning"]:
-                    # Continuation line with just meaning (or overflow text)
-                    draw.text(
-                        (current_x, compound_y),
-                        line_parts["meaning"],
-                        font=self.font_small,
-                        fill=COMPOUND_TEXT_COLOR,
-                    )
+                # 3. Draw meaning part in white
+                draw.text(
+                    (current_x, compound_y),
+                    compound["meaning"],
+                    font=self.font_small,
+                    fill=COMPOUND_TEXT_COLOR,
+                )
 
                 compound_y += line_spacing
-
-                # Safety check: don't draw text outside the box
                 if compound_y > box_y1 - box_padding:
                     break
+
 
         # Save the image
         try:
