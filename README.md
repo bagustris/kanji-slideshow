@@ -40,4 +40,9 @@ gsettings set org.gnome.desktop.background picture-options "scaled"
 ```
 
 # Use as a flash card   
-Just use your **image viewer** app inside one of the folders (e.g., JLPT-N5) and use left and right arrow to move from one kanji image to the next ones. 
+Just use your **image viewer** app inside one of the folders (e.g., JLPT-N5) and use left and right arrow to move from one kanji image to the next ones. For command line (linux) use `eog` (Eye of Gnome) or `feh` (Fast and light image viewer). For example:  
+
+```bash
+eog JLPT-N5
+```
+
