@@ -58,11 +58,11 @@ class KanjiImageGenerator:
     def _load_fonts(self):
         """Load suitable fonts for Japanese characters."""
         font_paths = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",  # Prefer Bold for better visibility
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Now using regular (non-bold) font
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Fallback Bold
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",  # Fallback Bold
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Regular.ttf",  # Fallback Regular
             "/System/Library/Fonts/Hiragino Sans GB.ttc",  # macOS
             "/Windows/Fonts/msgothic.ttc",  # Windows
         ]
@@ -212,7 +212,9 @@ class KanjiImageGenerator:
 
         # Collect target readings for highlighting in compounds
         target_readings = []
-        all_raw_readings = kanji_data.get("hiragana_readings", []) + kanji_data.get("katakana_readings", [])
+        all_raw_readings = kanji_data.get("hiragana_readings", []) + kanji_data.get(
+            "katakana_readings", []
+        )
         for r in all_raw_readings:
             # Remove okurigana markers (dot or anything after)
             clean_r = re.split(r"[.・]", r)[0].strip()
@@ -294,7 +296,9 @@ class KanjiImageGenerator:
                     else:
                         parts = reading.split(".", 1)
 
-                    bbox_before = draw.textbbox((0, 0), parts[0], font=self.font_reading)
+                    bbox_before = draw.textbbox(
+                        (0, 0), parts[0], font=self.font_reading
+                    )
                     bbox_after = draw.textbbox((0, 0), parts[1], font=self.font_reading)
                     width_before = bbox_before[2] - bbox_before[0]
                     width_after = bbox_after[2] - bbox_after[0]
@@ -516,12 +520,16 @@ class KanjiImageGenerator:
                     and line_parts["reading"]
                     and line_parts["meaning"]
                 ):
-                    # Full compound line with all parts - no brackets or equals sign
+                    # Full compound line with all parts - reading enclosed in brackets
                     # Draw kanji part character by character, highlighting target kanji
                     target_kanji = kanji_data["kanji"]
                     compound_has_target = target_kanji in line_parts["kanji"]
                     for char in line_parts["kanji"]:
-                        char_color = HIGHLIGHT_COLOR if char == target_kanji else COMPOUND_TEXT_COLOR
+                        char_color = (
+                            HIGHLIGHT_COLOR
+                            if char == target_kanji
+                            else COMPOUND_READING_COLOR
+                        )
                         draw.text(
                             (current_x, compound_y),
                             char,
@@ -532,10 +540,20 @@ class KanjiImageGenerator:
                         current_x += char_bbox[2] - char_bbox[0]
                     current_x += self._s(8)  # spacing after kanji word
 
-                    # Draw reading part: orange with blue highlight for target kanji reading
+                    # Draw reading part in white brackets (learning kanji and okurigana in blue)
                     reading_text = line_parts["reading"]
 
-                    # Find all non-overlapping matches
+                    # Draw opening bracket in white
+                    draw.text(
+                        (current_x, compound_y),
+                        "(",
+                        font=self.font_small,
+                        fill=COMPOUND_TEXT_COLOR,
+                    )
+                    bbox = draw.textbbox((0, 0), "(", font=self.font_small)
+                    current_x += bbox[2] - bbox[0]
+
+                    # Find all non-overlapping matches within reading_text (no brackets)
                     reading_matches = []
                     for tr in target_readings:
                         if not tr:
@@ -545,16 +563,16 @@ class KanjiImageGenerator:
                             idx = reading_text.find(tr, start_search)
                             if idx == -1:
                                 break
-                            # Check for overlap
                             if not any(
-                                idx < e and idx + len(tr) > s for s, e in reading_matches
+                                idx < e and idx + len(tr) > s
+                                for s, e in reading_matches
                             ):
                                 reading_matches.append((idx, idx + len(tr)))
                             start_search = idx + 1
 
                     reading_matches.sort()
 
-                    # Draw the reading segments
+                    # Draw the reading segments: matched parts in blue, others in orange
                     last_idx = 0
                     for start, end in reading_matches:
                         if start > last_idx:
@@ -579,16 +597,30 @@ class KanjiImageGenerator:
                         current_x += bbox[2] - bbox[0]
                         last_idx = end
 
+                    # Draw remaining text after last match (okurigana or non-matched reading)
                     if last_idx < len(reading_text):
-                        seg = reading_text[last_idx:]
+                        remaining = reading_text[last_idx:]
+                        remaining_color = (
+                            HIGHLIGHT_COLOR if reading_matches else COMPOUND_READING_COLOR
+                        )
                         draw.text(
                             (current_x, compound_y),
-                            seg,
+                            remaining,
                             font=self.font_small,
-                            fill=COMPOUND_READING_COLOR,
+                            fill=remaining_color,
                         )
-                        bbox = draw.textbbox((0, 0), seg, font=self.font_small)
+                        bbox = draw.textbbox((0, 0), remaining, font=self.font_small)
                         current_x += bbox[2] - bbox[0]
+
+                    # Draw closing bracket in white
+                    draw.text(
+                        (current_x, compound_y),
+                        ")",
+                        font=self.font_small,
+                        fill=COMPOUND_TEXT_COLOR,
+                    )
+                    bbox = draw.textbbox((0, 0), ")", font=self.font_small)
+                    current_x += bbox[2] - bbox[0]
 
                     current_x += 12  # Add more spacing before meaning
 
@@ -717,6 +749,7 @@ def main():
         input_files = [args.csv]
     else:
         input_files = [
+            "kanji_n1.csv",
             "kanji_n2.csv",
             "kanji_n3.csv",
             "kanji_n4.csv",
