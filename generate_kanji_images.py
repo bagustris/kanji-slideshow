@@ -12,6 +12,7 @@ kanji,meaning,readings,compounds
 """
 
 import csv
+import math
 import os
 import re
 import sys
@@ -31,11 +32,15 @@ COMPOUND_READING_COLOR = (
     165,
     0,
 )  # Orange color for hiragana readings in compounds
-ACCENT_COLOR = (100, 149, 237)  # Cornflower blue for section headers
+ACCENT_COLOR = (80, 200, 255)  # Bright blue
 HIGHLIGHT_COLOR = (80, 200, 255)  # Bright blue for target kanji in compounds
 KANJI_COLOR = (255, 255, 255)  # White for main kanji
 STROKE_ORDER_COLOR = (128, 128, 128)  # Gray for stroke order info
 READING_BG_COLOR = (45, 45, 45, 255)  # Subtle background for readings
+KUN_LABEL_COLOR = (140, 210, 80)  # Green for kun'yomi label
+ON_LABEL_COLOR = KUN_LABEL_COLOR  # Same green as kun'yomi label
+
+MAX_KUN_READINGS = 8  # Cap kun'yomi pills to avoid multi-line overflow
 
 
 class KanjiImageGenerator:
@@ -48,6 +53,7 @@ class KanjiImageGenerator:
         )
         self.font_large = None
         self.font_medium = None
+        self.font_meaning = None
         self.font_small = None
         self._load_fonts()
 
@@ -74,16 +80,22 @@ class KanjiImageGenerator:
                 try:
                     self.font_large = ImageFont.truetype(
                         font_path, self._s(300, minimum=40)
-                    )  # Main kanji (increased to 300px)
+                    )  # Main kanji
+                    self.font_meaning = ImageFont.truetype(
+                        font_path, self._s(52, minimum=18)
+                    )  # Meaning (prominent)
                     self.font_medium = ImageFont.truetype(
                         font_path, self._s(42, minimum=15)
-                    )  # Meaning (increased to 42px)
+                    )  # Readings / badge
                     self.font_reading = ImageFont.truetype(
                         font_path, self._s(42, minimum=15)
-                    )  # Readings (increased to 42px)
+                    )  # Reading pills
                     self.font_small = ImageFont.truetype(
                         font_path, self._s(42, minimum=15)
-                    )  # Compounds (42px)
+                    )  # Compounds
+                    self.font_label = ImageFont.truetype(
+                        font_path, self._s(30, minimum=11)
+                    )  # ON/KUN section labels
                     self.font_jis = ImageFont.truetype(
                         font_path, self._s(16, minimum=9)
                     )  # JIS code
@@ -99,9 +111,11 @@ class KanjiImageGenerator:
         )
         try:
             self.font_large = ImageFont.load_default()
+            self.font_meaning = ImageFont.load_default()
             self.font_medium = ImageFont.load_default()
             self.font_reading = ImageFont.load_default()
             self.font_small = ImageFont.load_default()
+            self.font_label = ImageFont.load_default()
             self.font_jis = ImageFont.load_default()
         except Exception:
             print("Error: Could not load any font")
@@ -148,6 +162,14 @@ class KanjiImageGenerator:
                         if katakana_part:
                             katakana_readings.extend(katakana_part)
 
+        # Deduplicate while preserving order
+        hiragana_readings = list(dict.fromkeys(hiragana_readings))
+        katakana_readings = list(dict.fromkeys(katakana_readings))
+
+        # Cap kun'yomi to avoid overwhelming the layout
+        if len(hiragana_readings) > MAX_KUN_READINGS:
+            hiragana_readings = hiragana_readings[:MAX_KUN_READINGS]
+
         # Parse compounds - format: "右腕 (うわん) = right arm; 手腕 (しゅわん) = ability; ..."
         compounds = []
         if compounds_str:
@@ -162,9 +184,13 @@ class KanjiImageGenerator:
                     r"([^\s(]+)\s*\(([^)]+)\)\s*=\s*(.+)", compound_part.strip()
                 )
                 if match:
+                    compound_kanji = match.group(1).strip()
+                    # Skip entries that are just the learned kanji alone
+                    if compound_kanji == kanji:
+                        continue
                     compounds.append(
                         {
-                            "kanji": match.group(1).strip(),
+                            "kanji": compound_kanji,
                             "reading": match.group(2).strip(),
                             "meaning": match.group(3).strip(),
                         }
@@ -222,13 +248,43 @@ class KanjiImageGenerator:
 
         return ""
 
-    def create_kanji_image(self, kanji_data, output_path):
+    def _estimate_content_height(self, kanji_data):
+        """Estimate total height of the right-column content block."""
+        line_h = self._s(55)
+        label_h = self._s(36)  # ON/KUN label height
+        vertical_spacing = self._s(20)
+
+        total = 0
+        total += line_h + vertical_spacing  # meaning line
+
+        if kanji_data.get("katakana_readings"):
+            total += label_h  # ON label
+            # Estimate one row of pills (may wrap but rare for on'yomi)
+            total += line_h + vertical_spacing
+
+        if kanji_data.get("hiragana_readings"):
+            total += label_h  # KUN label
+            # Estimate wrap rows: assume ~6 pills per row
+            n_kun = len(kanji_data["hiragana_readings"])
+            rows = math.ceil(n_kun / 6)
+            total += rows * line_h + vertical_spacing
+
+        # Compound box
+        n_cmp = len(kanji_data.get("compounds", []))
+        if n_cmp:
+            box_padding = self._s(15)
+            total += vertical_spacing + box_padding * 2 + n_cmp * line_h
+
+        return total
+
+    def create_kanji_image(self, kanji_data, output_path, jlpt_level=None):
         """
         Create a kanji wallpaper image with the specified layout.
 
         Args:
             kanji_data (dict): Parsed kanji data
             output_path (str): Path to save the image
+            jlpt_level (str): JLPT level string e.g. "N5" for badge display
         """
         if not kanji_data or not kanji_data.get("kanji"):
             print("Warning: Invalid kanji data for {}".format(output_path))
@@ -247,40 +303,45 @@ class KanjiImageGenerator:
         all_raw_readings = kanji_data.get("hiragana_readings", []) + kanji_data.get(
             "katakana_readings", []
         )
-        for r in all_raw_readings:
-            # Remove okurigana markers (dot or anything after)
-            clean_r = re.split(r"[.・]", r)[0].strip()
-            if not clean_r:
-                continue
-            # Convert to hiragana for matching (compound readings in CSV are usually hiragana)
-            h_r = "".join(
-                chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c for c in clean_r
+
+        def _to_hiragana(s):
+            return "".join(
+                chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c for c in s
             )
-            target_readings.append(h_r)
+
+        for r in all_raw_readings:
+            parts = re.split(r"[.・]", r)
+            stem = parts[0].strip()
+            if not stem:
+                continue
+            # Add stem (reading without okurigana)
+            target_readings.append(_to_hiragana(stem))
+            # Also add full form (dot removed) so e.g. "な.す" → "なす" matches compound readings
+            if len(parts) > 1:
+                full_form = "".join(p.strip() for p in parts)
+                if full_form:
+                    target_readings.append(_to_hiragana(full_form))
         # Sort by length descending to match longest possible reading first
         target_readings = sorted(list(set(target_readings)), key=len, reverse=True)
 
-        # --- Text Positioning ---
+        # --- Vertical centering ---
         x_margin = self._s(80)
-        # Center content vertically on the 1920x1080 canvas
-        # Estimate total content height and center it
-        estimated_content_height = self._s(400)  # Approximate height of all content
-        y_center_offset = (self.image_height - estimated_content_height) // 2
-        y_margin = max(self._s(50), y_center_offset)  # Ensure minimum margin
-        vertical_spacing = self._s(20)  # Additional vertical space between elements
+        vertical_spacing = self._s(20)
+        content_height = self._estimate_content_height(kanji_data)
+        y_margin = max(self._s(40), (self.image_height - content_height) // 2)
 
         # Left alignment for all text elements
         left_x = x_margin
 
-        # Draw the main Kanji character (large, left side) - centered vertically
-        kanji_y = y_margin + self._s(30)
+        # Draw the main Kanji character (large, left side) - vertically centered with content
+        kanji_y = y_margin
         draw.text((left_x, kanji_y), kanji, font=self.font_large, fill=KANJI_COLOR)
 
         # Calculate position for right column (next to kanji with some spacing)
-        right_x = left_x + self._s(350)  # Position right column next to kanji
+        right_x = left_x + self._s(350)
         right_y = y_margin
 
-        # Draw JIS code at top-right corner - aligned with top (skip if not available)
+        # Draw JIS code (skip if not available)
         if kanji_data.get("jis_code") and kanji_data["jis_code"].strip():
             jis_text = kanji_data["jis_code"]
             bbox = draw.textbbox((0, 0), jis_text, font=self.font_jis)
@@ -288,18 +349,18 @@ class KanjiImageGenerator:
             jis_x = self.image_width - x_margin - jis_width
             draw.text((jis_x, right_y), jis_text, font=self.font_jis, fill=TEXT_COLOR)
 
-        # Draw meaning - left-aligned in right column (no label)
+        # Draw meaning - prominent, white
         max_meaning_width = self.image_width - right_x - x_margin
         truncated_meaning = self._truncate_text(
-            kanji_data["meaning"], self.font_medium, max_meaning_width, draw
+            kanji_data["meaning"], self.font_meaning, max_meaning_width, draw
         )
         draw.text(
             (right_x, right_y),
             truncated_meaning,
-            font=self.font_medium,
+            font=self.font_meaning,
             fill=TEXT_COLOR,
         )
-        right_y += self._s(55) + vertical_spacing
+        right_y += self._s(62) + vertical_spacing
 
         pill_padding_x = self._s(6)
         pill_padding_y = self._s(4)
@@ -309,7 +370,6 @@ class KanjiImageGenerator:
 
         def _draw_text_background(x, y, text_width, text_bbox, padding_x, padding_y):
             """Draw a padded background behind text drawn at (x, y)."""
-            # text_bbox is a (left, top, right, bottom) bbox for the text at origin.
             x0 = x - padding_x
             y0 = y + text_bbox[1] - padding_y
             x1 = x + text_width + padding_x
@@ -364,18 +424,18 @@ class KanjiImageGenerator:
                         pill_padding_y,
                     )
 
-                    # Before dot: bright blue (the kanji reading); after dot: white (okurigana)
+                    # Before dot: orange (the kanji reading); after dot: cornflower blue (okurigana)
                     draw.text(
                         (current_x, y),
                         parts[0],
                         font=self.font_reading,
-                        fill=HIGHLIGHT_COLOR,
+                        fill=COMPOUND_READING_COLOR,
                     )
                     draw.text(
                         (current_x + width_before, y),
                         parts[1],
                         font=self.font_reading,
-                        fill=TEXT_COLOR,
+                        fill=ACCENT_COLOR,
                     )
                     current_x += pill_total_width + pill_gap
                 else:
@@ -402,34 +462,38 @@ class KanjiImageGenerator:
                         (current_x, y),
                         reading,
                         font=self.font_reading,
-                        fill=HIGHLIGHT_COLOR,
+                        fill=COMPOUND_READING_COLOR,
                     )
                     current_x += pill_total_width + pill_gap
 
             return y + reading_line_step + vertical_spacing
 
-        # Draw katakana readings first (onyomi)
+        def _draw_section_label(label, y, color):
+            """Draw a small ON/KUN section label and return updated y."""
+            draw.text((right_x, y), label, font=self.font_label, fill=color)
+            bbox = draw.textbbox((0, 0), label, font=self.font_label)
+            return y + (bbox[3] - bbox[1]) + self._s(4)
+
+        # Draw on'yomi (katakana) with label
         if kanji_data.get("katakana_readings"):
+            right_y = _draw_section_label("音読み (On'yomi)", right_y, ON_LABEL_COLOR)
             right_y = _draw_readings(kanji_data["katakana_readings"], right_y)
 
-        # Draw hiragana readings second (kunyomi)
+        # Draw kun'yomi (hiragana) with label
         if kanji_data.get("hiragana_readings"):
+            right_y = _draw_section_label("訓読み (Kun'yomi)", right_y, KUN_LABEL_COLOR)
             right_y = _draw_readings(kanji_data["hiragana_readings"], right_y)
 
         # --- Compounds Box ---
-        # Remove compounds label, start box directly
         box_padding = self._s(15)
-        line_spacing = self._s(55)  # Increased spacing for larger compound font
-        box_x0 = right_x - box_padding  # Left-aligned with other text
+        line_spacing = self._s(55)
+        box_x0 = right_x - box_padding
         box_y0 = right_y + vertical_spacing
 
-        # Calculate available box width more conservatively to prevent overflow
-        available_width = (
-            self.image_width - right_x - x_margin - self._s(20)
-        )  # Extra margin for safety
+        available_width = self.image_width - right_x - x_margin - self._s(20)
         max_box_width = available_width - (box_padding * 2)
 
-        # Process compounds - ensure each fits on one line with truncation
+        # Process compounds with truncation
         processed_compounds = []
         for compound in kanji_data["compounds"]:
             kanji_bbox = draw.textbbox((0, 0), compound["kanji"], font=self.font_small)
@@ -439,17 +503,15 @@ class KanjiImageGenerator:
             )
             reading_width = reading_bbox[2] - reading_bbox[0]
 
-            # Width for brackets and spacing
             extra_width = (
                 kanji_width
-                + self._s(8)  # Spacing after kanji
-                + self._s(20)  # Brackets width approx
+                + self._s(8)
+                + self._s(20)
                 + reading_width
-                + self._s(24)  # Spacing before meaning
+                + self._s(24)
             )
             available_for_meaning = max_box_width - extra_width
 
-            # Truncate meaning to fit the remaining space
             truncated_meaning = self._truncate_text(
                 compound["meaning"], self.font_small, available_for_meaning, draw
             )
@@ -462,23 +524,20 @@ class KanjiImageGenerator:
                 }
             )
 
-        # Calculate box height based on actual compounds
+        # Calculate box height
         if processed_compounds:
             max_available_height = self.image_height - box_y0 - self._s(30)
             ideal_content_height = len(processed_compounds) * line_spacing
             actual_content_height = min(
                 ideal_content_height, max_available_height - (box_padding * 2)
             )
-
             box_height = actual_content_height + (box_padding * 2)
             box_y1 = box_y0 + box_height
         else:
             box_y1 = box_y0 + (box_padding * 2) + 30
 
-        # Define the box dimensions
         box_x1 = self.image_width - x_margin
 
-        # Draw the filled rectangle with visible borders
         draw.rectangle(
             (box_x0, box_y0, box_x1, box_y1),
             fill=COMPOUND_BOX_COLOR,
@@ -486,19 +545,19 @@ class KanjiImageGenerator:
             width=2,
         )
 
-        # Now draw the compound text with colored components
+        # Draw compound text with colored components
         if processed_compounds:
             compound_y = box_y0 + box_padding
             for compound in processed_compounds:
                 current_x = right_x
 
-                # 1. Draw kanji part: Highlight target kanji in blue, others in orange
+                # 1. Kanji part: target kanji in orange, others in cornflower blue
                 target_kanji = kanji_data["kanji"]
                 for char in compound["kanji"]:
                     char_color = (
-                        HIGHLIGHT_COLOR
+                        COMPOUND_READING_COLOR
                         if char == target_kanji
-                        else COMPOUND_READING_COLOR
+                        else ACCENT_COLOR
                     )
                     draw.text(
                         (current_x, compound_y),
@@ -510,10 +569,9 @@ class KanjiImageGenerator:
                     current_x += char_bbox[2] - char_bbox[0]
                 current_x += self._s(8)
 
-                # 2. Draw reading part: brackets in white, target readings in blue, others in orange
+                # 2. Reading part
                 reading_text = compound["reading"]
 
-                # Draw opening bracket in white
                 draw.text(
                     (current_x, compound_y),
                     "(",
@@ -523,7 +581,7 @@ class KanjiImageGenerator:
                 bbox = draw.textbbox((0, 0), "(", font=self.font_small)
                 current_x += bbox[2] - bbox[0]
 
-                # Find matches for target readings
+                # Highlight target readings in blue, others in white
                 reading_matches = []
                 for tr in target_readings:
                     if not tr:
@@ -540,7 +598,6 @@ class KanjiImageGenerator:
                         start_search = idx + 1
                 reading_matches.sort()
 
-                # Draw reading segments: matched parts in blue, others in orange
                 last_idx = 0
                 for start, end in reading_matches:
                     if start > last_idx:
@@ -549,7 +606,7 @@ class KanjiImageGenerator:
                             (current_x, compound_y),
                             seg,
                             font=self.font_small,
-                            fill=COMPOUND_READING_COLOR,
+                            fill=ACCENT_COLOR,  # other reading: cornflower blue
                         )
                         bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                         current_x += bbox[2] - bbox[0]
@@ -559,7 +616,7 @@ class KanjiImageGenerator:
                         (current_x, compound_y),
                         seg,
                         font=self.font_small,
-                        fill=HIGHLIGHT_COLOR,
+                        fill=COMPOUND_READING_COLOR,  # target reading: orange
                     )
                     bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
@@ -571,12 +628,11 @@ class KanjiImageGenerator:
                         (current_x, compound_y),
                         seg,
                         font=self.font_small,
-                        fill=COMPOUND_READING_COLOR,
+                        fill=ACCENT_COLOR,  # other reading: cornflower blue
                     )
                     bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
 
-                # Draw closing bracket in white
                 draw.text(
                     (current_x, compound_y),
                     ")",
@@ -585,10 +641,9 @@ class KanjiImageGenerator:
                 )
                 bbox = draw.textbbox((0, 0), ")", font=self.font_small)
                 current_x += bbox[2] - bbox[0]
-
                 current_x += self._s(24)
 
-                # 3. Draw meaning part in white
+                # 3. Meaning in white
                 draw.text(
                     (current_x, compound_y),
                     compound["meaning"],
@@ -599,7 +654,6 @@ class KanjiImageGenerator:
                 compound_y += line_spacing
                 if compound_y > box_y1 - box_padding:
                     break
-
 
         # Save the image
         try:
@@ -741,18 +795,18 @@ def main():
 
         print("Found {} kanji entries.".format(len(kanji_list)))
 
-        # Determine output directory based on input
+        # Determine output directory and JLPT level from filename
         # pattern: kanji_xxx.csv -> JLPT-XXX
         input_basename = os.path.splitext(os.path.basename(input_file))[0]
 
-        # Find first underscore and extract everything after it
         if "_" in input_basename:
             after_first_underscore = input_basename.split("_", 1)[1]
-            # Convert to uppercase and replace remaining underscores with hyphens
             suffix = after_first_underscore.upper().replace("_", "-")
         else:
-            # Fallback if no underscore found
             suffix = input_basename.upper()
+
+        # Extract JLPT level for badge (e.g. "N5" from "N5" suffix)
+        jlpt_level = suffix if re.match(r"^N\d$", suffix) else None
 
         output_dir = "JLPT-{}".format(suffix)
         os.makedirs(output_dir, exist_ok=True)
@@ -761,12 +815,11 @@ def main():
         failed = 0
 
         for i, kanji_data in enumerate(kanji_list):
-            # Generate filename with zero-padding (5 digits like in N3)
             file_number = i + 1
             filename = "JLPT_{}_{:05d}.png".format(suffix, file_number)
             output_path = os.path.join(output_dir, filename)
 
-            if generator.create_kanji_image(kanji_data, output_path):
+            if generator.create_kanji_image(kanji_data, output_path, jlpt_level=jlpt_level):
                 successful += 1
             else:
                 failed += 1
