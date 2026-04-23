@@ -86,9 +86,11 @@ MAX_KUN_READINGS = 8  # Cap kun'yomi pills to avoid multi-line overflow
 
 
 class KanjiImageGenerator:
-    def __init__(self, image_width=BASE_IMAGE_WIDTH, image_height=BASE_IMAGE_HEIGHT):
+    def __init__(self, image_width=BASE_IMAGE_WIDTH, image_height=BASE_IMAGE_HEIGHT,
+                 show_pitch_accent=False):
         self.image_width = int(image_width)
         self.image_height = int(image_height)
+        self.show_pitch_accent = show_pitch_accent
         self.scale = min(
             self.image_width / float(BASE_IMAGE_WIDTH),
             self.image_height / float(BASE_IMAGE_HEIGHT),
@@ -780,7 +782,7 @@ class KanjiImageGenerator:
                     current_x += bbox[2] - bbox[0]
 
                 # Draw pitch-accent overline + downstep above the reading
-                if compound.get("pitch_accent") and _mora_pos:
+                if self.show_pitch_accent and compound.get("pitch_accent") and _mora_pos:
                     try:
                         _acc = int(compound["pitch_accent"].split(",")[0].strip())
                         _draw_pitch_lines(
@@ -931,6 +933,12 @@ def main():
         action="store_true",
         help="Auto-detect screen resolution (requires a GUI session).",
     )
+    parser.add_argument(
+        "--pitch-accent",
+        action="store_true",
+        default=False,
+        help="Draw pitch-accent overlines above compound readings (disabled by default).",
+    )
 
     args = parser.parse_args()
 
@@ -960,7 +968,11 @@ def main():
                 )
             )
 
-    generator = KanjiImageGenerator(image_width=args.width, image_height=args.height)
+    generator = KanjiImageGenerator(
+        image_width=args.width,
+        image_height=args.height,
+        show_pitch_accent=args.pitch_accent,
+    )
 
     for input_file in input_files:
         if not os.path.exists(input_file):
