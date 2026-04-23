@@ -18,6 +18,47 @@ import re
 import sys
 import argparse
 
+# ---------------------------------------------------------------------------
+# Pitch-accent helpers
+# ---------------------------------------------------------------------------
+
+# Small kana that attach to the preceding character to form a single mora
+# (e.g. き + ょ → "きょ")
+_COMBINING_SMALL_KANA = frozenset("ゃゅょぁぃぅぇぉゎャュョァィゥェォヮ")
+
+
+def split_into_morae(text):
+    """Split kana text into mora units, grouping digraphs such as きょ."""
+    morae = []
+    i = 0
+    while i < len(text):
+        if i + 1 < len(text) and text[i + 1] in _COMBINING_SMALL_KANA:
+            morae.append(text[i] + text[i + 1])
+            i += 2
+        else:
+            morae.append(text[i])
+            i += 1
+    return morae
+
+
+def pitch_pattern(n_morae, accent):
+    """Return a list of bool (True = HIGH pitch) for each mora.
+
+    accent 0  – heiban:    mora 1 LOW,  morae 2..n HIGH,  no drop
+    accent 1  – atamadaka: mora 1 HIGH, morae 2..n LOW
+    accent N  – (naka/odaka): mora 1 LOW, morae 2..N HIGH, morae N+1.. LOW
+    """
+    result = []
+    for k in range(1, n_morae + 1):
+        if accent == 0:
+            high = k > 1
+        elif accent == 1:
+            high = k == 1
+        else:
+            high = 2 <= k <= accent
+        result.append(high)
+    return result
+
 from PIL import Image, ImageDraw, ImageFont
 
 # Default image configuration (wallpaper baseline)
@@ -526,6 +567,40 @@ class KanjiImageGenerator:
             bbox = draw.textbbox((0, 0), label, font=self.font_label)
             return y + (bbox[3] - bbox[1]) + self._s(4)
 
+        def _draw_pitch_lines(mora_positions, is_high, y):
+            """Draw pitch-accent contour (overline + downstep) above compound reading."""
+            if not mora_positions or not any(is_high):
+                return
+            # Use textbbox to find actual glyph top relative to draw origin
+            ref_bb = draw.textbbox((0, 0), "あ", font=self.font_small)
+            line_y = y + ref_bb[1] - self._s(5)   # 5 px above character top
+            drop_h = self._s(9)
+            lw = max(1, self._s(2))
+            n = len(mora_positions)
+            i = 0
+            while i < n:
+                if is_high[i]:
+                    # extend the HIGH run
+                    j = i + 1
+                    while j < n and is_high[j]:
+                        j += 1
+                    x0 = mora_positions[i][0]
+                    x1 = mora_positions[j - 1][0] + mora_positions[j - 1][1]
+                    draw.line(
+                        [(x0, line_y), (x1, line_y)],
+                        fill=PITCH_ACCENT_COLOR,
+                        width=lw,
+                    )
+                    if j < n:  # downstep into next (LOW) mora
+                        draw.line(
+                            [(x1, line_y), (x1, line_y + drop_h)],
+                            fill=PITCH_ACCENT_COLOR,
+                            width=lw,
+                        )
+                    i = j
+                else:
+                    i += 1
+
         # Draw on'yomi (katakana) with label
         if kanji_data.get("katakana_readings"):
             right_y = _draw_section_label("音読み (On'yomi)", right_y, ON_LABEL_COLOR)
@@ -641,6 +716,17 @@ class KanjiImageGenerator:
                 bbox = draw.textbbox((0, 0), "(", font=self.font_small)
                 current_x += bbox[2] - bbox[0]
 
+                # Pre-compute mora positions for pitch-accent line drawing.
+                # Done here (before text is painted) so we know each mora's x offset.
+                _morae = split_into_morae(reading_text)
+                _mora_pos = []
+                _mx = current_x
+                for _m in _morae:
+                    _mb = draw.textbbox((0, 0), _m, font=self.font_small)
+                    _mw = _mb[2] - _mb[0]
+                    _mora_pos.append((_mx, _mw))
+                    _mx += _mw
+
                 # Highlight target readings in blue, others in white
                 reading_matches = []
                 for tr in target_readings:
@@ -692,6 +778,18 @@ class KanjiImageGenerator:
                     )
                     bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
+
+                # Draw pitch-accent overline + downstep above the reading
+                if compound.get("pitch_accent") and _mora_pos:
+                    try:
+                        _acc = int(compound["pitch_accent"].split(",")[0].strip())
+                        _draw_pitch_lines(
+                            _mora_pos,
+                            pitch_pattern(len(_morae), _acc),
+                            compound_y,
+                        )
+                    except (ValueError, IndexError):
+                        pass
 
                 # Pitch accent marker (yellow-gold), e.g. "·2"
                 if compound.get("pitch_accent"):
