@@ -632,7 +632,7 @@ class KanjiImageGenerator:
             )
             reading_width = reading_bbox[2] - reading_bbox[0]
 
-            accent_text = "·" + compound["pitch_accent"] if compound.get("pitch_accent") else ""
+            accent_text = "·" + compound["pitch_accent"] if (self.show_pitch_accent and compound.get("pitch_accent")) else ""
             accent_width = 0
             if accent_text:
                 ab = draw.textbbox((0, 0), accent_text, font=self.font_small)
@@ -781,8 +781,8 @@ class KanjiImageGenerator:
                     bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
 
-                # Draw pitch-accent overline + downstep above the reading
-                if self.show_pitch_accent and compound.get("pitch_accent") and _mora_pos:
+                # Draw pitch-accent overline + downstep above the reading (always on)
+                if compound.get("pitch_accent") and _mora_pos:
                     try:
                         _acc = int(compound["pitch_accent"].split(",")[0].strip())
                         _draw_pitch_lines(
@@ -793,8 +793,8 @@ class KanjiImageGenerator:
                     except (ValueError, IndexError):
                         pass
 
-                # Pitch accent marker (yellow-gold), e.g. "·2"
-                if compound.get("pitch_accent"):
+                # Pitch accent number symbol (·N) — opt-in via --pitch-accent
+                if self.show_pitch_accent and compound.get("pitch_accent"):
                     accent_text = "·" + compound["pitch_accent"]
                     draw.text(
                         (current_x, compound_y),
