@@ -33,6 +33,7 @@ COMPOUND_READING_COLOR = (
     0,
 )  # Orange color for hiragana readings in compounds
 ACCENT_COLOR = (80, 200, 255)  # Bright blue
+PITCH_ACCENT_COLOR = (255, 210, 60)  # Yellow-gold for pitch accent number
 HIGHLIGHT_COLOR = (80, 200, 255)  # Bright blue for target kanji in compounds
 KANJI_COLOR = (255, 255, 255)  # White for main kanji
 STROKE_ORDER_COLOR = (128, 128, 128)  # Gray for stroke order info
@@ -179,9 +180,10 @@ class KanjiImageGenerator:
             ]
 
             for compound_part in compound_parts:
-                # Match pattern: "kanji (reading) = meaning"
+                # Match pattern: "kanji (reading[·accent]) = meaning"
                 match = re.match(
-                    r"([^\s(]+)\s*\(([^)]+)\)\s*=\s*(.+)", compound_part.strip()
+                    r"([^\s(]+)\s*\(([^)·]+)(?:·([^)]*))?\)\s*=\s*(.+)",
+                    compound_part.strip(),
                 )
                 if match:
                     compound_kanji = match.group(1).strip()
@@ -192,9 +194,16 @@ class KanjiImageGenerator:
                         {
                             "kanji": compound_kanji,
                             "reading": match.group(2).strip(),
-                            "meaning": match.group(3).strip(),
+                            "pitch_accent": match.group(3).strip() if match.group(3) else None,
+                            "meaning": match.group(4).strip(),
                         }
                     )
+
+        # Optional enrichment fields (added by enrich_kanji_csv.py)
+        sentence    = row.get("sentence", "").strip()    if "sentence"    in row else ""
+        translation = row.get("translation", "").strip() if "translation" in row else ""
+        radicals    = row.get("radicals", "").strip()    if "radicals"    in row else ""
+        confusables = row.get("confusables", "").strip() if "confusables" in row else ""
 
         return {
             "kanji": kanji,
@@ -202,6 +211,10 @@ class KanjiImageGenerator:
             "hiragana_readings": hiragana_readings,
             "katakana_readings": katakana_readings,
             "compounds": compounds,
+            "sentence": sentence,
+            "translation": translation,
+            "radicals": radicals.split() if radicals else [],
+            "confusables": [c for c in confusables.split(",") if c] if confusables else [],
         }
 
     @staticmethod
@@ -249,33 +262,41 @@ class KanjiImageGenerator:
         return ""
 
     def _estimate_content_height(self, kanji_data):
-        """Estimate total height of the right-column content block."""
+        """Estimate the taller of the two columns to use for vertical centering."""
         line_h = self._s(55)
-        label_h = self._s(36)  # ON/KUN label height
+        label_h = self._s(36)
         vertical_spacing = self._s(20)
 
-        total = 0
-        total += line_h + vertical_spacing  # meaning line
+        # Left column: kanji glyph + optional radicals + optional confusables
+        left_h = self._s(320)  # main kanji glyph
+        if kanji_data.get("radicals"):
+            left_h += vertical_spacing + label_h + line_h
+        if kanji_data.get("confusables"):
+            left_h += vertical_spacing + label_h + line_h
+
+        # Right column: meaning + readings + compounds + sentence
+        right_h = self._s(62) + vertical_spacing  # meaning line
 
         if kanji_data.get("katakana_readings"):
-            total += label_h  # ON label
-            # Estimate one row of pills (may wrap but rare for on'yomi)
-            total += line_h + vertical_spacing
+            right_h += label_h + line_h + vertical_spacing
 
         if kanji_data.get("hiragana_readings"):
-            total += label_h  # KUN label
-            # Estimate wrap rows: assume ~6 pills per row
+            right_h += label_h
             n_kun = len(kanji_data["hiragana_readings"])
             rows = math.ceil(n_kun / 6)
-            total += rows * line_h + vertical_spacing
+            right_h += rows * line_h + vertical_spacing
 
-        # Compound box
         n_cmp = len(kanji_data.get("compounds", []))
         if n_cmp:
             box_padding = self._s(15)
-            total += vertical_spacing + box_padding * 2 + n_cmp * line_h
+            right_h += vertical_spacing + box_padding * 2 + n_cmp * line_h
 
-        return total
+        if kanji_data.get("sentence"):
+            right_h += vertical_spacing + label_h + line_h  # label + sentence
+            if kanji_data.get("translation"):
+                right_h += self._s(36) + vertical_spacing
+
+        return max(left_h, right_h)
 
     def create_kanji_image(self, kanji_data, output_path, jlpt_level=None):
         """
@@ -336,10 +357,41 @@ class KanjiImageGenerator:
         # Draw the main Kanji character (large, left side) - vertically centered with content
         kanji_y = y_margin
         draw.text((left_x, kanji_y), kanji, font=self.font_large, fill=KANJI_COLOR)
+        kanji_bbox = draw.textbbox((left_x, kanji_y), kanji, font=self.font_large)
+        kanji_bottom = kanji_bbox[3]
 
         # Calculate position for right column (next to kanji with some spacing)
         right_x = left_x + self._s(350)
         right_y = y_margin
+
+        # --- Left column: radicals and confusables below the main kanji ---
+        left_y = kanji_bottom + vertical_spacing * 2
+
+        if kanji_data.get("radicals"):
+            draw.text((left_x, left_y), "部首 (Radicals)", font=self.font_label, fill=KUN_LABEL_COLOR)
+            lbl_bbox = draw.textbbox((0, 0), "部首 (Radicals)", font=self.font_label)
+            left_y += (lbl_bbox[3] - lbl_bbox[1]) + self._s(4)
+            rad_x = left_x
+            max_left_x = right_x - self._s(10)
+            for rad in kanji_data["radicals"]:
+                b = draw.textbbox((0, 0), rad, font=self.font_small)
+                char_w = b[2] - b[0]
+                if rad_x + char_w > max_left_x and rad_x != left_x:
+                    left_y += self._s(55)
+                    rad_x = left_x
+                draw.text((rad_x, left_y), rad, font=self.font_small, fill=HIGHLIGHT_COLOR)
+                rad_x += char_w + self._s(8)
+            left_y += self._s(55) + vertical_spacing
+
+        if kanji_data.get("confusables"):
+            draw.text((left_x, left_y), "混同 (Confuse)", font=self.font_label, fill=(220, 80, 80))
+            lbl_bbox = draw.textbbox((0, 0), "混同 (Confuse)", font=self.font_label)
+            left_y += (lbl_bbox[3] - lbl_bbox[1]) + self._s(4)
+            conf_x = left_x
+            for conf in kanji_data["confusables"]:
+                draw.text((conf_x, left_y), conf, font=self.font_small, fill=COMPOUND_READING_COLOR)
+                b = draw.textbbox((0, 0), conf, font=self.font_small)
+                conf_x += b[2] - b[0] + self._s(16)
 
         # Draw JIS code (skip if not available)
         if kanji_data.get("jis_code") and kanji_data["jis_code"].strip():
@@ -503,11 +555,18 @@ class KanjiImageGenerator:
             )
             reading_width = reading_bbox[2] - reading_bbox[0]
 
+            accent_text = "·" + compound["pitch_accent"] if compound.get("pitch_accent") else ""
+            accent_width = 0
+            if accent_text:
+                ab = draw.textbbox((0, 0), accent_text, font=self.font_small)
+                accent_width = ab[2] - ab[0]
+
             extra_width = (
                 kanji_width
                 + self._s(8)
                 + self._s(20)
                 + reading_width
+                + accent_width
                 + self._s(24)
             )
             available_for_meaning = max_box_width - extra_width
@@ -520,6 +579,7 @@ class KanjiImageGenerator:
                 {
                     "kanji": compound["kanji"],
                     "reading": compound["reading"],
+                    "pitch_accent": compound.get("pitch_accent"),
                     "meaning": truncated_meaning,
                 }
             )
@@ -633,6 +693,18 @@ class KanjiImageGenerator:
                     bbox = draw.textbbox((0, 0), seg, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
 
+                # Pitch accent marker (yellow-gold), e.g. "·2"
+                if compound.get("pitch_accent"):
+                    accent_text = "·" + compound["pitch_accent"]
+                    draw.text(
+                        (current_x, compound_y),
+                        accent_text,
+                        font=self.font_small,
+                        fill=PITCH_ACCENT_COLOR,
+                    )
+                    bbox = draw.textbbox((0, 0), accent_text, font=self.font_small)
+                    current_x += bbox[2] - bbox[0]
+
                 draw.text(
                     (current_x, compound_y),
                     ")",
@@ -654,6 +726,20 @@ class KanjiImageGenerator:
                 compound_y += line_spacing
                 if compound_y > box_y1 - box_padding:
                     break
+
+        # --- Bottom of right column: example sentence ---
+        if kanji_data.get("sentence"):
+            right_y = box_y1 + vertical_spacing * 2
+            right_y = _draw_section_label("例文 (Example)", right_y, KUN_LABEL_COLOR)
+            sentence_text = kanji_data["sentence"]
+            draw.text((right_x, right_y), sentence_text, font=self.font_small, fill=TEXT_COLOR)
+            right_y += self._s(50)
+            if kanji_data.get("translation"):
+                trans = self._truncate_text(
+                    kanji_data["translation"], self.font_label,
+                    self.image_width - right_x - x_margin, draw
+                )
+                draw.text((right_x, right_y), trans, font=self.font_label, fill=ACCENT_COLOR)
 
         # Save the image
         try:
