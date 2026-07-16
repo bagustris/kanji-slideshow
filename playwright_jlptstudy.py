@@ -1,8 +1,14 @@
 import csv
 import argparse
-import time
+import logging
+from typing import List, Dict, Optional
 
-def scrape_kanji(level):
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def scrape_kanji(level: int, max_retries: int = 3) -> List[Dict]:
+    """Scrape JLPT kanji data from jlptstudy.net with retry logic."""
     results = []
     try:
         from playwright.sync_api import sync_playwright
@@ -20,18 +26,19 @@ def scrape_kanji(level):
             page.wait_for_load_state("networkidle")
 
             kanji_boxes = page.query_selector_all("#kanji-body .kanji-box")
-            print(f"Found {len(kanji_boxes)} kanji boxes")
+            logger.info(f"Found {len(kanji_boxes)} kanji boxes")
 
             total_to_process = len(kanji_boxes)
 
             for i, box in enumerate(kanji_boxes[:total_to_process], start=1):
-                print(f"Processing kanji {i}/{total_to_process}...")
+                logger.info(f"Processing kanji {i}/{total_to_process}...")
 
-                try:
-                    box.click()
-                    time.sleep(0.5)
+                for attempt in range(max_retries):
+                    try:
+                        box.click()
+                        # Wait for kanji data to appear (replaces time.sleep)
+                        page.wait_for_selector("#kanji-body #kanji-data", timeout=5000)
 
-                    if page.query_selector("#kanji-body #kanji-data"):
                         kanji_el = page.query_selector(
                             "#kanji-body #kanji-data .data-header .char"
                         )
@@ -100,22 +107,36 @@ def scrape_kanji(level):
                             )
 
                             if i % 10 == 0:
-                                print(f"  ✓ Completed {i} kanji so far...")
+                                logger.info(f"  ✓ Completed {i} kanji so far...")
+
+                            break  # Success, exit retry loop
 
                         else:
-                            print(f"  ✗ Could not find elements for kanji {i}")
-                    else:
-                        print(f"  ✗ Kanji data not found for kanji {i}")
+                            logger.warning(f"  ✗ Could not find elements for kanji {i}")
+                            if attempt < max_retries - 1:
+                                page.wait_for_timeout(1000)  # Wait before retry
+                                continue
+                            break
 
-                except Exception as e:
-                    print(f"  ✗ Error processing kanji {i}: {e}")
+                    except Exception as e:
+                        logger.error(
+                            f"  ✗ Error processing kanji {i} (attempt {attempt + 1}): {e}"
+                        )
+                        if attempt < max_retries - 1:
+                            page.wait_for_timeout(2000)  # Wait before retry
+                        else:
+                            logger.error(
+                                f"  ✗ Failed to process kanji {i} after {max_retries} attempts"
+                            )
+
         finally:
             browser.close()
 
     return results
 
 
-def write_results_csv(level, results):
+def write_results_csv(level: int, results: List[Dict]) -> str:
+    """Write scraped results to CSV file."""
     filename = f"kanji_n{level}.csv"
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
@@ -130,7 +151,7 @@ def write_results_csv(level, results):
                     "readings": "; ".join(result["readings"]),
                     "compounds": "; ".join(
                         [
-                            f'{compound["word"]} ({compound["kana"]}) = {compound["translation"]}'
+                            f"{compound['word']} ({compound['kana']}) = {compound['translation']}"
                             for compound in result["compounds"]
                         ]
                     ),
@@ -150,13 +171,20 @@ def main():
         choices=[1, 2, 3, 4, 5],
         help="JLPT level to scrape (1-5, default: 2)",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum retry attempts per kanji (default: 3)",
+    )
     args = parser.parse_args()
 
-    results = scrape_kanji(args.level)
-    print(f"Scraped {len(results)} kanji successfully!")
+    results = scrape_kanji(args.level, max_retries=args.max_retries)
+    logger.info(f"Scraped {len(results)} kanji successfully!")
 
     filename = write_results_csv(args.level, results)
-    print(f"Data saved to {filename} with {len(results)} entries!")
+    logger.info(f"Data saved to {filename} with {len(results)} entries!")
+
 
 if __name__ == "__main__":
     main()

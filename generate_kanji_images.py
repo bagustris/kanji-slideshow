@@ -17,6 +17,10 @@ import os
 import re
 import sys
 import argparse
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Pitch-accent helpers
@@ -48,6 +52,10 @@ def pitch_pattern(n_morae, accent):
     accent 1  – atamadaka: mora 1 HIGH, morae 2..n LOW
     accent N  – (naka/odaka): mora 1 LOW, morae 2..N HIGH, morae N+1.. LOW
     """
+    if n_morae == 1 and accent == 0:
+        # Match 10ten's single-mora heiban display.
+        return [True]
+
     result = []
     for k in range(1, n_morae + 1):
         if accent == 0:
@@ -59,6 +67,8 @@ def pitch_pattern(n_morae, accent):
         result.append(high)
     return result
 
+
+from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 
 # Default image configuration (wallpaper baseline)
@@ -74,20 +84,26 @@ COMPOUND_READING_COLOR = (
     0,
 )  # Orange color for hiragana readings in compounds
 ACCENT_COLOR = (80, 200, 255)  # Bright blue
-PITCH_ACCENT_COLOR = (255, 210, 60)  # Yellow-gold for pitch accent number
+PITCH_ACCENT_COLOR = COMPOUND_READING_COLOR  # Match pitch contour to reading
 HIGHLIGHT_COLOR = (80, 200, 255)  # Bright blue for target kanji in compounds
 KANJI_COLOR = (255, 255, 255)  # White for main kanji
 STROKE_ORDER_COLOR = (128, 128, 128)  # Gray for stroke order info
+READING_SECONDARY_COLOR = (160, 160, 160)  # Gray for okurigana in reading pills
 READING_BG_COLOR = (45, 45, 45, 255)  # Subtle background for readings
-KUN_LABEL_COLOR = (140, 210, 80)  # Green for kun'yomi label
-ON_LABEL_COLOR = KUN_LABEL_COLOR  # Same green as kun'yomi label
+KUN_LABEL_COLOR = ACCENT_COLOR  # Blue for kun'yomi label
+ON_LABEL_COLOR = KUN_LABEL_COLOR  # Same blue as kun'yomi label
+COMPOUND_ROW_TINT_COLOR = (30, 30, 30)  # Subtle alternating tint for compound rows
 
 MAX_KUN_READINGS = 8  # Cap kun'yomi pills to avoid multi-line overflow
 
 
 class KanjiImageGenerator:
-    def __init__(self, image_width=BASE_IMAGE_WIDTH, image_height=BASE_IMAGE_HEIGHT,
-                 show_pitch_accent=False):
+    def __init__(
+        self,
+        image_width=BASE_IMAGE_WIDTH,
+        image_height=BASE_IMAGE_HEIGHT,
+        show_pitch_accent=False,
+    ):
         self.image_width = int(image_width)
         self.image_height = int(image_height)
         self.show_pitch_accent = show_pitch_accent
@@ -120,38 +136,40 @@ class KanjiImageGenerator:
         # Try to load fonts in different sizes.
         # Font sizes are scaled based on the chosen output resolution.
         for font_path in font_paths:
-            if os.path.exists(font_path):
+            if not os.path.exists(font_path):
+                continue
+
+            fonts = {}
+            font_sizes = {
+                "font_large": ("Main kanji", 300, 40),
+                "font_meaning": ("Meaning (prominent)", 52, 18),
+                "font_medium": ("Readings / badge", 42, 15),
+                "font_reading": ("Reading pills", 42, 15),
+                "font_small": ("Compounds", 42, 15),
+                "font_label": ("ON/KUN section labels", 30, 11),
+                "font_jis": ("JIS code", 16, 9),
+            }
+
+            success = True
+            for attr_name, (desc, size, minimum) in font_sizes.items():
                 try:
-                    self.font_large = ImageFont.truetype(
-                        font_path, self._s(300, minimum=40)
-                    )  # Main kanji
-                    self.font_meaning = ImageFont.truetype(
-                        font_path, self._s(52, minimum=18)
-                    )  # Meaning (prominent)
-                    self.font_medium = ImageFont.truetype(
-                        font_path, self._s(42, minimum=15)
-                    )  # Readings / badge
-                    self.font_reading = ImageFont.truetype(
-                        font_path, self._s(42, minimum=15)
-                    )  # Reading pills
-                    self.font_small = ImageFont.truetype(
-                        font_path, self._s(42, minimum=15)
-                    )  # Compounds
-                    self.font_label = ImageFont.truetype(
-                        font_path, self._s(30, minimum=11)
-                    )  # ON/KUN section labels
-                    self.font_jis = ImageFont.truetype(
-                        font_path, self._s(16, minimum=9)
-                    )  # JIS code
-                    print("Successfully loaded font: {}".format(font_path))
-                    return
+                    setattr(
+                        self,
+                        attr_name,
+                        ImageFont.truetype(font_path, self._s(size, minimum=minimum)),
+                    )
                 except Exception as e:
-                    print("Failed to load font {}: {}".format(font_path, e))
-                    continue
+                    logger.warning(f"Failed to load {desc} from {font_path}: {e}")
+                    success = False
+                    break
+
+            if success:
+                logger.info(f"Successfully loaded font: {font_path}")
+                return
 
         # Fallback to default font
-        print(
-            "Warning: Using default font. Japanese characters may not display correctly."
+        logger.warning(
+            "Using default font. Japanese characters may not display correctly."
         )
         try:
             self.font_large = ImageFont.load_default()
@@ -161,8 +179,8 @@ class KanjiImageGenerator:
             self.font_small = ImageFont.load_default()
             self.font_label = ImageFont.load_default()
             self.font_jis = ImageFont.load_default()
-        except Exception:
-            print("Error: Could not load any font")
+        except Exception as e:
+            logger.error(f"Could not load any font: {e}")
 
     def parse_csv_entry(self, row):
         """
@@ -237,15 +255,17 @@ class KanjiImageGenerator:
                         {
                             "kanji": compound_kanji,
                             "reading": match.group(2).strip(),
-                            "pitch_accent": match.group(3).strip() if match.group(3) else None,
+                            "pitch_accent": match.group(3).strip()
+                            if match.group(3)
+                            else None,
                             "meaning": match.group(4).strip(),
                         }
                     )
 
         # Optional enrichment fields (added by enrich_kanji_csv.py)
-        sentence    = row.get("sentence", "").strip()    if "sentence"    in row else ""
+        sentence = row.get("sentence", "").strip() if "sentence" in row else ""
         translation = row.get("translation", "").strip() if "translation" in row else ""
-        radicals    = row.get("radicals", "").strip()    if "radicals"    in row else ""
+        radicals = row.get("radicals", "").strip() if "radicals" in row else ""
         confusables = row.get("confusables", "").strip() if "confusables" in row else ""
 
         return {
@@ -257,7 +277,9 @@ class KanjiImageGenerator:
             "sentence": sentence,
             "translation": translation,
             "radicals": radicals.split() if radicals else [],
-            "confusables": [c for c in confusables.split(",") if c] if confusables else [],
+            "confusables": [c for c in confusables.split(",") if c]
+            if confusables
+            else [],
         }
 
     @staticmethod
@@ -332,7 +354,8 @@ class KanjiImageGenerator:
         n_cmp = len(kanji_data.get("compounds", []))
         if n_cmp:
             box_padding = self._s(15)
-            right_h += vertical_spacing + box_padding * 2 + n_cmp * line_h
+            compound_line_h = self._s(64)
+            right_h += vertical_spacing + box_padding * 2 + n_cmp * compound_line_h
 
         if kanji_data.get("sentence"):
             right_h += vertical_spacing + label_h + line_h  # label + sentence
@@ -341,7 +364,9 @@ class KanjiImageGenerator:
 
         return max(left_h, right_h)
 
-    def create_kanji_image(self, kanji_data, output_path, jlpt_level=None):
+    def create_kanji_image(
+        self, kanji_data: dict, output_path: str, jlpt_level: Optional[str] = None
+    ) -> bool:
         """
         Create a kanji wallpaper image with the specified layout.
 
@@ -351,7 +376,7 @@ class KanjiImageGenerator:
             jlpt_level (str): JLPT level string e.g. "N5" for badge display
         """
         if not kanji_data or not kanji_data.get("kanji"):
-            print("Warning: Invalid kanji data for {}".format(output_path))
+            logger.warning(f"Invalid kanji data for {output_path}")
             return False
 
         # Create image
@@ -361,32 +386,6 @@ class KanjiImageGenerator:
         draw = ImageDraw.Draw(image)
 
         kanji = kanji_data["kanji"]
-
-        # Collect target readings for highlighting in compounds
-        target_readings = []
-        all_raw_readings = kanji_data.get("hiragana_readings", []) + kanji_data.get(
-            "katakana_readings", []
-        )
-
-        def _to_hiragana(s):
-            return "".join(
-                chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c for c in s
-            )
-
-        for r in all_raw_readings:
-            parts = re.split(r"[.・]", r)
-            stem = parts[0].strip()
-            if not stem:
-                continue
-            # Add stem (reading without okurigana)
-            target_readings.append(_to_hiragana(stem))
-            # Also add full form (dot removed) so e.g. "な.す" → "なす" matches compound readings
-            if len(parts) > 1:
-                full_form = "".join(p.strip() for p in parts)
-                if full_form:
-                    target_readings.append(_to_hiragana(full_form))
-        # Sort by length descending to match longest possible reading first
-        target_readings = sorted(list(set(target_readings)), key=len, reverse=True)
 
         # --- Vertical centering ---
         x_margin = self._s(80)
@@ -411,7 +410,12 @@ class KanjiImageGenerator:
         left_y = kanji_bottom + vertical_spacing * 2
 
         if kanji_data.get("radicals"):
-            draw.text((left_x, left_y), "部首 (Radicals)", font=self.font_label, fill=KUN_LABEL_COLOR)
+            draw.text(
+                (left_x, left_y),
+                "部首 (Radicals)",
+                font=self.font_label,
+                fill=KUN_LABEL_COLOR,
+            )
             lbl_bbox = draw.textbbox((0, 0), "部首 (Radicals)", font=self.font_label)
             left_y += (lbl_bbox[3] - lbl_bbox[1]) + self._s(4)
             rad_x = left_x
@@ -422,27 +426,41 @@ class KanjiImageGenerator:
                 if rad_x + char_w > max_left_x and rad_x != left_x:
                     left_y += self._s(55)
                     rad_x = left_x
-                draw.text((rad_x, left_y), rad, font=self.font_small, fill=HIGHLIGHT_COLOR)
+                draw.text(
+                    (rad_x, left_y), rad, font=self.font_small, fill=HIGHLIGHT_COLOR
+                )
                 rad_x += char_w + self._s(8)
             left_y += self._s(55) + vertical_spacing
 
         if kanji_data.get("confusables"):
-            draw.text((left_x, left_y), "混同 (Confuse)", font=self.font_label, fill=(220, 80, 80))
+            draw.text(
+                (left_x, left_y),
+                "混同 (Confuse)",
+                font=self.font_label,
+                fill=(220, 80, 80),
+            )
             lbl_bbox = draw.textbbox((0, 0), "混同 (Confuse)", font=self.font_label)
             left_y += (lbl_bbox[3] - lbl_bbox[1]) + self._s(4)
             conf_x = left_x
             for conf in kanji_data["confusables"]:
-                draw.text((conf_x, left_y), conf, font=self.font_small, fill=COMPOUND_READING_COLOR)
+                draw.text(
+                    (conf_x, left_y),
+                    conf,
+                    font=self.font_small,
+                    fill=COMPOUND_READING_COLOR,
+                )
                 b = draw.textbbox((0, 0), conf, font=self.font_small)
                 conf_x += b[2] - b[0] + self._s(16)
 
-        # Draw JIS code (skip if not available)
+        # Draw JIS code (if available - requires enrichment step)
         if kanji_data.get("jis_code") and kanji_data["jis_code"].strip():
             jis_text = kanji_data["jis_code"]
             bbox = draw.textbbox((0, 0), jis_text, font=self.font_jis)
             jis_width = bbox[2] - bbox[0]
             jis_x = self.image_width - x_margin - jis_width
             draw.text((jis_x, right_y), jis_text, font=self.font_jis, fill=TEXT_COLOR)
+        elif "jis_code" in kanji_data:
+            logger.debug(f"No JIS code available for kanji: {kanji}")
 
         # Draw meaning - prominent, white
         max_meaning_width = self.image_width - right_x - x_margin
@@ -476,8 +494,29 @@ class KanjiImageGenerator:
             except Exception:
                 draw.rectangle((x0, y0, x1, y1), fill=READING_BG_COLOR)
 
-        def _draw_readings(readings, y):
+        def _draw_readings(readings, y, marker=None, marker_color=TEXT_COLOR):
+            marker_gap = self._s(16)
             current_x = right_x
+
+            if marker:
+                marker_bbox = draw.textbbox((0, 0), marker, font=self.font_label)
+                reading_bbox = draw.textbbox((0, 0), "あ", font=self.font_reading)
+                reading_center_y = y + (reading_bbox[1] + reading_bbox[3]) / 2.0
+                marker_y = int(
+                    round(
+                        reading_center_y
+                        - (marker_bbox[1] + marker_bbox[3]) / 2.0
+                    )
+                )
+                draw.text(
+                    (current_x, marker_y),
+                    marker,
+                    font=self.font_label,
+                    fill=marker_color,
+                )
+                current_x += (marker_bbox[2] - marker_bbox[0]) + marker_gap
+
+            line_start_x = current_x
 
             for reading in readings:
                 # Determine pill dimensions up front for wrapping.
@@ -499,10 +538,10 @@ class KanjiImageGenerator:
 
                     if (
                         current_x + pill_total_width > max_reading_x
-                        and current_x != right_x
+                        and current_x != line_start_x
                     ):
                         y += reading_line_step
-                        current_x = right_x
+                        current_x = line_start_x
 
                     combined_bbox = (
                         0,
@@ -519,7 +558,7 @@ class KanjiImageGenerator:
                         pill_padding_y,
                     )
 
-                    # Before dot: orange (the kanji reading); after dot: cornflower blue (okurigana)
+                    # Before dot: kanji reading; after dot: okurigana in gray.
                     draw.text(
                         (current_x, y),
                         parts[0],
@@ -530,7 +569,7 @@ class KanjiImageGenerator:
                         (current_x + width_before, y),
                         parts[1],
                         font=self.font_reading,
-                        fill=ACCENT_COLOR,
+                        fill=READING_SECONDARY_COLOR,
                     )
                     current_x += pill_total_width + pill_gap
                 else:
@@ -540,10 +579,10 @@ class KanjiImageGenerator:
 
                     if (
                         current_x + pill_total_width > max_reading_x
-                        and current_x != right_x
+                        and current_x != line_start_x
                     ):
                         y += reading_line_step
-                        current_x = right_x
+                        current_x = line_start_x
 
                     _draw_text_background(
                         current_x,
@@ -563,59 +602,92 @@ class KanjiImageGenerator:
 
             return y + reading_line_step + vertical_spacing
 
-        def _draw_section_label(label, y, color):
-            """Draw a small ON/KUN section label and return updated y."""
-            draw.text((right_x, y), label, font=self.font_label, fill=color)
-            bbox = draw.textbbox((0, 0), label, font=self.font_label)
-            return y + (bbox[3] - bbox[1]) + self._s(4)
-
         def _draw_pitch_lines(mora_positions, is_high, y):
-            """Draw pitch-accent contour (overline + downstep) above compound reading."""
-            if not mora_positions or not any(is_high):
+            """Draw a 10ten-style binary pitch contour around the compound reading."""
+            if not mora_positions or len(mora_positions) != len(is_high):
                 return
-            # Use textbbox to find actual glyph top relative to draw origin
-            ref_bb = draw.textbbox((0, 0), "あ", font=self.font_small)
-            line_y = y + ref_bb[1] - self._s(5)   # 5 px above character top
-            drop_h = self._s(9)
-            lw = max(1, self._s(2))
-            n = len(mora_positions)
-            i = 0
-            while i < n:
-                if is_high[i]:
-                    # extend the HIGH run
-                    j = i + 1
-                    while j < n and is_high[j]:
-                        j += 1
-                    x0 = mora_positions[i][0]
-                    x1 = mora_positions[j - 1][0] + mora_positions[j - 1][1]
-                    draw.line(
-                        [(x0, line_y), (x1, line_y)],
-                        fill=PITCH_ACCENT_COLOR,
-                        width=lw,
-                    )
-                    if j < n:  # downstep into next (LOW) mora
+
+            def _draw_dotted_segment(x0, y0, x1, y1):
+                dot = self._s(4)
+                gap = self._s(3)
+                step = dot + gap
+
+                if x0 == x1:
+                    if y1 < y0:
+                        y0, y1 = y1, y0
+                    pos = y0
+                    while pos <= y1:
+                        end = min(pos + dot - 1, y1)
                         draw.line(
-                            [(x1, line_y), (x1, line_y + drop_h)],
+                            [(x0, pos), (x1, end)],
                             fill=PITCH_ACCENT_COLOR,
                             width=lw,
                         )
-                    i = j
-                else:
-                    i += 1
+                        pos += step
+                    return
+
+                if y0 == y1:
+                    if x1 < x0:
+                        x0, x1 = x1, x0
+                    pos = x0
+                    while pos <= x1:
+                        end = min(pos + dot - 1, x1)
+                        draw.line(
+                            [(pos, y0), (end, y1)],
+                            fill=PITCH_ACCENT_COLOR,
+                            width=lw,
+                        )
+                        pos += step
+                    return
+
+                draw.line([(x0, y0), (x1, y1)], fill=PITCH_ACCENT_COLOR, width=lw)
+
+            # Use textbbox to find actual glyph extents relative to draw origin.
+            ref_bb = draw.textbbox((0, 0), "あ", font=self.font_small)
+            high_y = y + ref_bb[1] - self._s(4)
+            low_y = y + ref_bb[3] + self._s(2)
+            lw = max(1, self._s(2))
+
+            n = len(mora_positions)
+            i = 0
+            while i < n:
+                run_high = is_high[i]
+                j = i + 1
+                while j < n and is_high[j] == run_high:
+                    j += 1
+
+                x0 = mora_positions[i][0]
+                x1 = mora_positions[j - 1][0] + mora_positions[j - 1][1]
+                line_y = high_y if run_high else low_y
+                _draw_dotted_segment(x0, line_y, x1, line_y)
+
+                if j < n:
+                    next_y = high_y if is_high[j] else low_y
+                    _draw_dotted_segment(x1, line_y, x1, next_y)
+
+                i = j
 
         # Draw on'yomi (katakana) with label
         if kanji_data.get("katakana_readings"):
-            right_y = _draw_section_label("音読み (On'yomi)", right_y, ON_LABEL_COLOR)
-            right_y = _draw_readings(kanji_data["katakana_readings"], right_y)
+            right_y = _draw_readings(
+                kanji_data["katakana_readings"],
+                right_y,
+                marker="音",
+                marker_color=ON_LABEL_COLOR,
+            )
 
         # Draw kun'yomi (hiragana) with label
         if kanji_data.get("hiragana_readings"):
-            right_y = _draw_section_label("訓読み (Kun'yomi)", right_y, KUN_LABEL_COLOR)
-            right_y = _draw_readings(kanji_data["hiragana_readings"], right_y)
+            right_y = _draw_readings(
+                kanji_data["hiragana_readings"],
+                right_y,
+                marker="訓",
+                marker_color=KUN_LABEL_COLOR,
+            )
 
         # --- Compounds Box ---
         box_padding = self._s(15)
-        line_spacing = self._s(55)
+        line_spacing = self._s(64)  # a bit looser than other rows for scanability
         box_x0 = right_x - box_padding
         box_y0 = right_y + vertical_spacing
 
@@ -632,7 +704,11 @@ class KanjiImageGenerator:
             )
             reading_width = reading_bbox[2] - reading_bbox[0]
 
-            accent_text = "·" + compound["pitch_accent"] if (self.show_pitch_accent and compound.get("pitch_accent")) else ""
+            accent_text = (
+                "·" + compound["pitch_accent"]
+                if (self.show_pitch_accent and compound.get("pitch_accent"))
+                else ""
+            )
             accent_width = 0
             if accent_text:
                 ab = draw.textbbox((0, 0), accent_text, font=self.font_small)
@@ -641,7 +717,7 @@ class KanjiImageGenerator:
             extra_width = (
                 kanji_width
                 + self._s(8)
-                + self._s(20)
+                + self._s(12)
                 + reading_width
                 + accent_width
                 + self._s(24)
@@ -685,16 +761,27 @@ class KanjiImageGenerator:
         # Draw compound text with colored components
         if processed_compounds:
             compound_y = box_y0 + box_padding
-            for compound in processed_compounds:
+            for idx, compound in enumerate(processed_compounds):
+                # Alternate a subtle tint behind every other row so each
+                # compound reads as its own chunk instead of one dense block.
+                if idx % 2 == 1:
+                    # Span the row's full slot (compound_y is already its top);
+                    # shrinking this without growing it clips descenders (g/y/p).
+                    row_y0 = max(box_y0 + 2, compound_y)
+                    row_y1 = min(box_y1 - 2, compound_y + line_spacing)
+                    draw.rectangle(
+                        (box_x0 + 2, row_y0, box_x1 - 2, row_y1),
+                        fill=COMPOUND_ROW_TINT_COLOR,
+                    )
+
                 current_x = right_x
 
-                # 1. Kanji part: target kanji in orange, others in cornflower blue
-                target_kanji = kanji_data["kanji"]
+                # 1. Kanji part: white, except the kanji being studied, which is
+                # highlighted in the same blue as the main glyph so the learner
+                # can spot it inside the word at a glance.
                 for char in compound["kanji"]:
                     char_color = (
-                        COMPOUND_READING_COLOR
-                        if char == target_kanji
-                        else ACCENT_COLOR
+                        HIGHLIGHT_COLOR if char == kanji else COMPOUND_TEXT_COLOR
                     )
                     draw.text(
                         (current_x, compound_y),
@@ -708,15 +795,7 @@ class KanjiImageGenerator:
 
                 # 2. Reading part
                 reading_text = compound["reading"]
-
-                draw.text(
-                    (current_x, compound_y),
-                    "(",
-                    font=self.font_small,
-                    fill=COMPOUND_TEXT_COLOR,
-                )
-                bbox = draw.textbbox((0, 0), "(", font=self.font_small)
-                current_x += bbox[2] - bbox[0]
+                current_x += self._s(4)
 
                 # Pre-compute mora positions for pitch-accent line drawing.
                 # Done here (before text is painted) so we know each mora's x offset.
@@ -729,69 +808,42 @@ class KanjiImageGenerator:
                     _mora_pos.append((_mx, _mw))
                     _mx += _mw
 
-                # Highlight target readings in blue, others in white
-                reading_matches = []
-                for tr in target_readings:
-                    if not tr:
-                        continue
-                    start_search = 0
-                    while True:
-                        idx = reading_text.find(tr, start_search)
-                        if idx == -1:
-                            break
-                        if not any(
-                            idx < e and idx + len(tr) > s for s, e in reading_matches
-                        ):
-                            reading_matches.append((idx, idx + len(tr)))
-                        start_search = idx + 1
-                reading_matches.sort()
-
-                last_idx = 0
-                for start, end in reading_matches:
-                    if start > last_idx:
-                        seg = reading_text[last_idx:start]
-                        draw.text(
-                            (current_x, compound_y),
-                            seg,
-                            font=self.font_small,
-                            fill=ACCENT_COLOR,  # other reading: cornflower blue
-                        )
-                        bbox = draw.textbbox((0, 0), seg, font=self.font_small)
-                        current_x += bbox[2] - bbox[0]
-
-                    seg = reading_text[start:end]
-                    draw.text(
-                        (current_x, compound_y),
-                        seg,
-                        font=self.font_small,
-                        fill=COMPOUND_READING_COLOR,  # target reading: orange
-                    )
-                    bbox = draw.textbbox((0, 0), seg, font=self.font_small)
-                    current_x += bbox[2] - bbox[0]
-                    last_idx = end
-
-                if last_idx < len(reading_text):
-                    seg = reading_text[last_idx:]
-                    draw.text(
-                        (current_x, compound_y),
-                        seg,
-                        font=self.font_small,
-                        fill=ACCENT_COLOR,  # other reading: cornflower blue
-                    )
-                    bbox = draw.textbbox((0, 0), seg, font=self.font_small)
-                    current_x += bbox[2] - bbox[0]
+                draw.text(
+                    (current_x, compound_y),
+                    reading_text,
+                    font=self.font_small,
+                    fill=COMPOUND_READING_COLOR,
+                )
+                bbox = draw.textbbox((0, 0), reading_text, font=self.font_small)
+                current_x += bbox[2] - bbox[0]
 
                 # Draw pitch-accent overline + downstep above the reading (always on)
-                if compound.get("pitch_accent") and _mora_pos:
+                if compound.get("pitch_accent") and _morae:
                     try:
-                        _acc = int(compound["pitch_accent"].split(",")[0].strip())
-                        _draw_pitch_lines(
-                            _mora_pos,
-                            pitch_pattern(len(_morae), _acc),
-                            compound_y,
+                        # Support multiple comma-separated pitch accents (use first valid)
+                        accent_values = [
+                            a.strip()
+                            for a in compound["pitch_accent"].split(",")
+                            if a.strip()
+                        ]
+                        _acc = None
+                        for val in accent_values:
+                            try:
+                                _acc = int(val)
+                                break
+                            except ValueError:
+                                continue
+
+                        if _acc is not None:
+                            _draw_pitch_lines(
+                                _mora_pos,
+                                pitch_pattern(len(_morae), _acc),
+                                compound_y,
+                            )
+                    except (ValueError, IndexError) as e:
+                        logger.debug(
+                            f"Could not parse pitch accent for {compound['kanji']}: {e}"
                         )
-                    except (ValueError, IndexError):
-                        pass
 
                 # Pitch accent number symbol (·N) — opt-in via --pitch-accent
                 if self.show_pitch_accent and compound.get("pitch_accent"):
@@ -805,14 +857,6 @@ class KanjiImageGenerator:
                     bbox = draw.textbbox((0, 0), accent_text, font=self.font_small)
                     current_x += bbox[2] - bbox[0]
 
-                draw.text(
-                    (current_x, compound_y),
-                    ")",
-                    font=self.font_small,
-                    fill=COMPOUND_TEXT_COLOR,
-                )
-                bbox = draw.textbbox((0, 0), ")", font=self.font_small)
-                current_x += bbox[2] - bbox[0]
                 current_x += self._s(24)
 
                 # 3. Meaning in white
@@ -832,37 +876,44 @@ class KanjiImageGenerator:
             right_y = box_y1 + vertical_spacing * 2
             right_y = _draw_section_label("例文 (Example)", right_y, KUN_LABEL_COLOR)
             sentence_text = kanji_data["sentence"]
-            draw.text((right_x, right_y), sentence_text, font=self.font_small, fill=TEXT_COLOR)
+            draw.text(
+                (right_x, right_y), sentence_text, font=self.font_small, fill=TEXT_COLOR
+            )
             right_y += self._s(50)
             if kanji_data.get("translation"):
                 trans = self._truncate_text(
-                    kanji_data["translation"], self.font_label,
-                    self.image_width - right_x - x_margin, draw
+                    kanji_data["translation"],
+                    self.font_label,
+                    self.image_width - right_x - x_margin,
+                    draw,
                 )
-                draw.text((right_x, right_y), trans, font=self.font_label, fill=ACCENT_COLOR)
+                draw.text(
+                    (right_x, right_y), trans, font=self.font_label, fill=ACCENT_COLOR
+                )
 
         # Save the image
         try:
             image.save(output_path, "PNG")
-            print("✓ Created: {}".format(output_path))
+            logger.info(f"✓ Created: {output_path}")
             return True
         except Exception as e:
-            print("✗ Error saving {}: {}".format(output_path, e))
+            logger.error(f"✗ Error saving {output_path}: {e}")
             return False
 
 
-def parse_kanji_csv_file(file_path, parser=None):
+def parse_kanji_csv_file(file_path: str, parser=None) -> list:
     """
     Parse the CSV file containing kanji data.
 
     Args:
         file_path (str): Path to the CSV file
+        parser: Optional KanjiImageGenerator instance
 
     Returns:
         list: List of parsed kanji data dictionaries
     """
     if not os.path.exists(file_path):
-        print("Error: File {} not found.".format(file_path))
+        logger.error(f"File not found: {file_path}")
         return []
 
     parsed_kanji = []
@@ -872,21 +923,19 @@ def parse_kanji_csv_file(file_path, parser=None):
         with open(file_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
 
-            for row_num, row in enumerate(
-                reader, start=2
-            ):  # Start at 2 since header is row 1
+            for row_num, row in enumerate(reader, start=2):
                 try:
                     kanji_data = parser.parse_csv_entry(row)
                     if kanji_data and kanji_data.get("kanji"):
                         parsed_kanji.append(kanji_data)
                     else:
-                        print("Warning: Invalid kanji data at row {}".format(row_num))
+                        logger.warning(f"Invalid kanji data at row {row_num}")
                 except Exception as e:
-                    print("Error parsing row {}: {}".format(row_num, e))
+                    logger.error(f"Error parsing row {row_num}: {e}")
                     continue
 
     except Exception as e:
-        print("Error reading CSV file: {}".format(e))
+        logger.error(f"Error reading CSV file: {e}")
         return []
 
     return parsed_kanji
@@ -960,12 +1009,10 @@ def main():
         detected = _detect_screen_size()
         if detected:
             args.width, args.height = detected
-            print("Using detected screen size: {}x{}".format(args.width, args.height))
+            logger.info(f"Using detected screen size: {args.width}x{args.height}")
         else:
-            print(
-                "Warning: Could not detect screen size; using {}x{}".format(
-                    args.width, args.height
-                )
+            logger.warning(
+                f"Could not detect screen size; using {args.width}x{args.height}"
             )
 
     generator = KanjiImageGenerator(
@@ -976,20 +1023,30 @@ def main():
 
     for input_file in input_files:
         if not os.path.exists(input_file):
-            print("Error: Input file not found: {}".format(input_file))
+            logger.error(f"Input file not found: {input_file}")
             if args.csv:
                 return
             continue
 
-        print("\n=== Processing: {} ===".format(input_file))
-        print("Parsing kanji CSV data...")
+        logger.info(f"\n=== Processing: {input_file} ===")
+
+        # Validate CSV has required columns
+        with open(input_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            required_cols = {"kanji", "meaning", "readings", "compounds"}
+            if not required_cols.issubset(reader.fieldnames or []):
+                missing = required_cols - set(reader.fieldnames or [])
+                logger.error(f"Missing required columns in {input_file}: {missing}")
+                continue
+
+        logger.info("Parsing kanji CSV data...")
         kanji_list = parse_kanji_csv_file(input_file, parser=generator)
 
         if not kanji_list:
-            print("No valid kanji data found in the CSV file.")
+            logger.warning("No valid kanji data found in the CSV file.")
             continue
 
-        print("Found {} kanji entries.".format(len(kanji_list)))
+        logger.info(f"Found {len(kanji_list)} kanji entries.")
 
         # Determine output directory and JLPT level from filename
         # pattern: kanji_xxx.csv -> JLPT-XXX
@@ -1015,20 +1072,20 @@ def main():
             filename = "JLPT_{}_{:05d}.png".format(suffix, file_number)
             output_path = os.path.join(output_dir, filename)
 
-            if generator.create_kanji_image(kanji_data, output_path, jlpt_level=jlpt_level):
+            if generator.create_kanji_image(
+                kanji_data, output_path, jlpt_level=jlpt_level
+            ):
                 successful += 1
             else:
                 failed += 1
-                print(
-                    "Failed to create image for kanji: {}".format(
-                        kanji_data.get("kanji", "unknown")
-                    )
+                logger.error(
+                    f"Failed to create image for kanji: {kanji_data.get('kanji', 'unknown')}"
                 )
 
-        print("\n=== Generation Complete ({}) ===".format(input_file))
-        print("✓ Successfully created: {} images".format(successful))
-        print("✗ Failed: {} images".format(failed))
-        print("📁 Output directory: {}".format(output_dir))
+        logger.info(f"\n=== Generation Complete ({input_file}) ===")
+        logger.info(f"✓ Successfully created: {successful} images")
+        logger.info(f"✗ Failed: {failed} images")
+        logger.info(f"📁 Output directory: {output_dir}")
 
 
 if __name__ == "__main__":
