@@ -871,6 +871,11 @@ class KanjiImageGenerator:
                 if compound_y > box_y1 - box_padding:
                     break
 
+        def _draw_section_label(text, y, color):
+            draw.text((right_x, y), text, font=self.font_label, fill=color)
+            lbl_bbox = draw.textbbox((0, 0), text, font=self.font_label)
+            return y + (lbl_bbox[3] - lbl_bbox[1]) + self._s(4)
+
         # --- Bottom of right column: example sentence ---
         if kanji_data.get("sentence"):
             right_y = box_y1 + vertical_spacing * 2
