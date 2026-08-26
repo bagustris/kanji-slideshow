@@ -968,7 +968,7 @@ def main():
     parser.add_argument(
         "csv",
         nargs="?",
-        help="Optional input CSV file. If omitted, processes kanji_n2.csv..kanji_n5.csv",
+        help="Optional input CSV file. If omitted, processes vendor/kanji-data/kanji/kanji_n1.csv..kanji_n5.csv",
     )
     parser.add_argument(
         "--width",
@@ -1003,11 +1003,11 @@ def main():
         input_files = [args.csv]
     else:
         input_files = [
-            "kanji_n1.csv",
-            "kanji_n2.csv",
-            "kanji_n3.csv",
-            "kanji_n4.csv",
-            "kanji_n5.csv",
+            "vendor/kanji-data/kanji/kanji_n1.csv",
+            "vendor/kanji-data/kanji/kanji_n2.csv",
+            "vendor/kanji-data/kanji/kanji_n3.csv",
+            "vendor/kanji-data/kanji/kanji_n4.csv",
+            "vendor/kanji-data/kanji/kanji_n5.csv",
         ]
 
     if args.screen:
